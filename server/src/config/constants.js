@@ -20,7 +20,8 @@ export const CONFIG = {
 
     // Request timeouts (ms)
     SEARCH_TIMEOUT_MS: parseInt(process.env.SEARCH_TIMEOUT_MS || "15000", 10),
-    LLM_TIMEOUT_MS: parseInt(process.env.LLM_TIMEOUT_MS || "30000", 10),
+    LLM_TIMEOUT_MS: parseInt(process.env.LLM_TIMEOUT_MS || "45000", 10),
+    GROQ_JSON_MAX_TOKENS: parseInt(process.env.GROQ_JSON_MAX_TOKENS || "1200", 10),
 
     // Verification statuses
     STATUSES: {
