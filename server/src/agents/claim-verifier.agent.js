@@ -91,72 +91,114 @@ export async function verifyClaims(claims, sources) {
 
     const sourceMap = new Map(sources.map((s) => [s.id, s]));
 
-    const evidenceForModel = sources.map((s) => ({
-        id: s.id,
-        title: s.title,
-        url: s.url,
-        content: (s.content || "").slice(0, 1800)
-    }));
+    // Keep verification prompts small: rank sources lexically for each claim,
+    // then send only the best few excerpts instead of every retrieved page.
+    const STOP_WORDS = new Set([
+        "the", "and", "for", "that", "with", "from", "this", "these", "those",
+        "was", "were", "are", "is", "has", "have", "had", "will", "can", "could",
+        "should", "would", "into", "than", "then", "their", "they", "them",
+        "about", "which", "what", "when", "where", "how", "why", "who", "also",
+        "more", "most", "some", "many", "such", "over", "under", "between",
+        "among", "through", "based", "using", "used", "including", "according"
+    ]);
 
-    const batchSize = 4;
+    const tokenize = (value) => (value || "")
+        .toLowerCase()
+        .match(/[a-z0-9]{3,}/g) || [];
+
+    function rankSourcesForClaim(claim) {
+        const terms = [...new Set(tokenize(claim.text).filter((word) => !STOP_WORDS.has(word)))];
+        return sources.map((source) => {
+            const titleTokens = new Set(tokenize(source.title));
+            const contentTokens = new Set(tokenize(source.content));
+            const score = terms.reduce((total, term) =>
+                total + (titleTokens.has(term) ? 3 : contentTokens.has(term) ? 1 : 0), 0);
+            return { source, score };
+        })
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, CONFIG.MAX_EVIDENCE_SOURCES_PER_CLAIM || 3)
+        .map((entry) => entry.source);
+    }
+
+    const batchSize = 2;
     const allResults = [];
 
     for (let i = 0; i < claims.length; i += batchSize) {
         const batch = claims.slice(i, i + batchSize);
+        const relevantSources = new Map();
+
+        for (const claim of batch) {
+            for (const source of rankSourcesForClaim(claim)) {
+                relevantSources.set(source.id, source);
+            }
+        }
+
+        const selectedSources = [...relevantSources.values()];
+        const evidenceForModel = selectedSources.map((s) => ({
+            id: s.id,
+            title: s.title,
+            url: s.url,
+            content: (s.content || "").slice(0, 1100)
+        }));
 
         const prompt = `
 You are the Claim Verification Agent for VeriMind AI.
 
-Your responsibility is to strictly evaluate factual claims using ONLY the provided web evidence.
+Evaluate each claim using ONLY the supplied web evidence. Do not use outside knowledge.
 
-CLAIMS TO VERIFY:
-${JSON.stringify(batch, null, 2)}
+CLAIMS:
+${JSON.stringify(batch)}
 
-AVAILABLE EVIDENCE SOURCES:
-${JSON.stringify(evidenceForModel, null, 2)}
+EVIDENCE:
+${JSON.stringify(evidenceForModel)}
 
-VERIFICATION CRITERIA:
-1. "supported": The retrieved evidence explicitly confirms all factual elements of the claim.
-2. "partially_supported": The evidence corroborates parts of the claim, but lacks evidence for secondary elements or numbers.
-3. "contradicted": The evidence explicitly disproves or directly conflicts with the factual claim.
-4. "insufficient_evidence": The evidence does not contain direct proof or denial. Discussing a related topic is NOT proof.
+RULES:
+- "supported" means every material factual element is explicitly confirmed.
+- "partially_supported" means only some elements are confirmed.
+- "contradicted" means a source directly conflicts with the claim.
+- "insufficient_evidence" means the supplied text does not prove or disprove it.
+- Related keywords or a source discussing the same topic are not proof.
+- Every evidence excerpt must be a verbatim passage copied from the supplied source content.
+- Return sourceId values only from the supplied evidence IDs.
+- If there are no relevant sources or no direct quotation, use insufficient_evidence.
+- Keep rationale concise (one or two sentences).
+- Provide reviewReason, availableEvidenceSummary, missingEvidence, and recommendedAction for every claim.
 
-STRICT EVIDENCE RULES:
-- Do NOT use internal background knowledge; rely solely on the supplied text.
-- Every piece of evidence MUST include a direct verbatim "excerpt" from the source content.
-- If you cannot cite a direct quotation from the source text, the status MUST be "insufficient_evidence".
-- For every claim, explain the reasoning in "rationale".
-- If the claim is contradicted, partially supported, insufficient, or a compound claim, provide:
-  - "reviewReason": Why human review is needed.
-  - "availableEvidenceSummary": What evidence actually shows.
-  - "missingEvidence": What specific proof is missing.
-  - "recommendedAction": Practical step for human investigator.
-
-Return JSON in this format:
+Return ONLY this JSON object:
 {
-    "verifications": [
-        {
-            "claimId": "C1",
-            "status": "supported",
-            "rationale": "Directly confirmed by Source 1.",
-            "evidence": [
-                {
-                    "sourceId": 1,
-                    "excerpt": "Verbatim quote from source content."
-                }
-            ],
-            "reviewNeeded": false,
-            "reviewReason": null,
-            "availableEvidenceSummary": "Full corroboration found in Source 1.",
-            "missingEvidence": null,
-            "recommendedAction": "Claim is well-supported by retrieved evidence."
-        }
-    ]
+  "verifications": [
+    {
+      "claimId": "C1",
+      "status": "supported",
+      "rationale": "Concise evidence-based explanation.",
+      "evidence": [{"sourceId": 1, "excerpt": "Exact source quotation."}],
+      "reviewNeeded": false,
+      "reviewReason": null,
+      "availableEvidenceSummary": "What the source establishes.",
+      "missingEvidence": null,
+      "recommendedAction": "No further action."
+    }
+  ]
 }
 `;
 
-        const result = await generateJsonWithGroq(prompt);
+        if (selectedSources.length === 0) {
+            allResults.push(...batch.map((claim) => ({
+                claimId: claim.id,
+                status: CONFIG.STATUSES.INSUFFICIENT_EVIDENCE,
+                rationale: "No retrieved source contained relevant terms for this claim.",
+                evidence: [],
+                reviewNeeded: true,
+                reviewReason: "No relevant source was selected.",
+                availableEvidenceSummary: "No relevant evidence found in the retrieved source set.",
+                missingEvidence: "A source that directly addresses this claim.",
+                recommendedAction: "Run a focused search for this exact claim."
+            })));
+            continue;
+        }
 
+        const result = await generateJsonWithGroq(prompt);
         if (result && Array.isArray(result.verifications)) {
             allResults.push(...result.verifications);
         } else {
