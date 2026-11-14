@@ -7,6 +7,24 @@ import { cacheService } from "../services/cache.service.js";
 const router = express.Router();
 
 /**
+ * Reject greetings, acknowledgements, and very short non-research input
+ * before they consume Tavily or Groq free-tier requests.
+ */
+function isResearchWorthyQuery(query) {
+    const normalized = query.trim().toLowerCase().replace(/[.!?,]+$/g, "");
+    const greetings = new Set([
+        "hi", "hello", "helloo", "hey", "hii", "hiii", "good morning",
+        "good afternoon", "good evening", "thanks", "thank you", "ok",
+        "okay", "test", "testing", "yo", "bye"
+    ]);
+
+    if (greetings.has(normalized)) return false;
+    if (normalized.length < 8) return false;
+
+    return true;
+}
+
+/**
  * Direct web search endpoint
  */
 router.post("/search", async (req, res) => {
@@ -52,9 +70,19 @@ router.post("/answer", async (req, res) => {
             });
         }
 
-        console.log(`[API /research/answer] Processing: "${query.trim().slice(0, 60)}"`);
+        const normalizedQuery = query.trim();
 
-        const result = await researchAndAnswer(query.trim(), { bypassCache });
+        if (!isResearchWorthyQuery(normalizedQuery)) {
+            return res.status(400).json({
+                success: false,
+                code: "NOT_A_RESEARCH_QUERY",
+                message: "Please enter a research question or a topic you want to investigate. For example: 'How is AI changing healthcare?'"
+            });
+        }
+
+        console.log(`[API /research/answer] Processing: "${normalizedQuery.slice(0, 60)}"`);
+
+        const result = await researchAndAnswer(normalizedQuery, { bypassCache });
 
         return res.status(200).json({
             success: true,
