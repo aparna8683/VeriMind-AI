@@ -88,46 +88,45 @@ export async function generateWithGroq(prompt) {
 export async function generateJsonWithGroq(prompt) {
     const groq = getGroqClient();
     const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
-
-    const maxAttempts = 4;
+    const timeoutMs = CONFIG.LLM_TIMEOUT_MS;
+    const maxAttempts = 2;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`Groq JSON request timed out after ${CONFIG.LLM_TIMEOUT_MS}ms`)), CONFIG.LLM_TIMEOUT_MS)
-            );
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-            const completionPromise = groq.chat.completions.create({
+        try {
+            console.log(`[Groq JSON] Request attempt ${attempt}/${maxAttempts}`);
+
+            const completion = await groq.chat.completions.create({
                 model,
                 messages: [
                     {
                         role: "system",
-                        content: "You are a precise JSON-only extraction and verification engine. Output ONLY a valid JSON object matching the requested schema. Do not output preamble or markdown commentary."
+                        content: "You are a precise JSON-only extraction and verification engine. Output only a valid compact JSON object matching the requested structure."
                     },
-                    {
-                        role: "user",
-                        content: prompt
-                    }
+                    { role: "user", content: prompt }
                 ],
-                temperature: 0.1,
-                response_format: {
-                    type: "json_object"
-                }
-            });
+                temperature: 0,
+                max_tokens: CONFIG.GROQ_JSON_MAX_TOKENS || 1200,
+                response_format: { type: "json_object" }
+            }, { signal: controller.signal, timeout: timeoutMs });
 
-            const completion = await Promise.race([completionPromise, timeoutPromise]);
             const rawContent = completion.choices[0]?.message?.content;
+            if (!rawContent) throw new Error("Groq returned an empty JSON response");
 
-            if (!rawContent) {
-                throw new Error("Groq returned an empty response");
-            }
-
-            const cleaned = extractJsonString(rawContent);
-            return JSON.parse(cleaned);
+            return JSON.parse(extractJsonString(rawContent));
         } catch (error) {
             const status = Number(error.status);
-            const isJsonParseError = error instanceof SyntaxError;
-            const retryable = status === 429 || status === 503 || isJsonParseError;
+            const isAbort = error.name === "AbortError" || error.name === "APIConnectionTimeoutError";
+            const retryable = status === 429 || status === 503;
+
+            if (isAbort || error.message?.toLowerCase().includes("timeout")) {
+                const timeoutError = new Error(`Groq JSON request timed out after ${timeoutMs}ms`);
+                timeoutError.code = "GROQ_TIMEOUT";
+                console.error("[Groq JSON Timeout]", timeoutError.message);
+                throw timeoutError;
+            }
 
             if (!retryable || attempt === maxAttempts) {
                 console.error(`[Groq JSON Error] Attempt ${attempt} failed:`, error.message);
@@ -137,10 +136,14 @@ export async function generateJsonWithGroq(prompt) {
             const retryAfter = Number(error.headers?.get?.("retry-after"));
             const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
                 ? retryAfter * 1000
-                : Math.min(1500 * Math.pow(2, attempt - 1), 8000);
+                : Math.min(1500 * Math.pow(2, attempt - 1), 6000);
 
-            console.warn(`[Groq JSON Retry] (${error.message}). Retrying in ${delayMs}ms...`);
+            console.warn(`[Groq JSON Retry] HTTP ${status}. Retrying in ${delayMs}ms...`);
             await sleep(delayMs);
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
+
+    throw new Error("Groq JSON generation failed after retry attempts");
 }
