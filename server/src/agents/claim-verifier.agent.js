@@ -218,6 +218,10 @@ RULES:
 - Return sourceId values only from the supplied evidence IDs.
 - If there are no relevant sources or no direct quotation, use insufficient_evidence.
 - Keep rationale concise (one or two sentences).
+- For every compound claim, return one assertionResults item for each supplied subAssertion, preserving its exact text.
+- Each assertionResults item must have its own status and verbatim evidence excerpts.
+- Do not use claim-level evidence to imply that every sub-assertion is supported.
+- For non-compound claims, assertionResults may be an empty array.
 - Provide reviewReason, availableEvidenceSummary, missingEvidence, and recommendedAction for every claim.
 
 Return ONLY this JSON object:
@@ -228,6 +232,13 @@ Return ONLY this JSON object:
       "status": "supported",
       "rationale": "Concise evidence-based explanation.",
       "evidence": [{"sourceId": 1, "excerpt": "Exact source quotation."}],
+      "assertionResults": [
+        {
+          "assertion": "Exact sub-assertion text.",
+          "status": "supported",
+          "evidence": [{"sourceId": 1, "excerpt": "Exact source quotation."}]
+        }
+      ],
       "reviewNeeded": false,
       "reviewReason": null,
       "availableEvidenceSummary": "What the source establishes.",
@@ -272,10 +283,20 @@ Return ONLY this JSON object:
         }
     }
 
-    const verificationMap = new Map(allResults.map((item) => [item.claimId, item]));
+    const verificationMap = new Map();
+    const resultCounts = new Map();
+    for (const item of allResults) {
+        if (item?.claimId == null) continue;
+        const id = String(item.claimId);
+        resultCounts.set(id, (resultCounts.get(id) || 0) + 1);
+        verificationMap.set(id, item);
+    }
 
     const verifications = claims.map((claim) => {
-        const item = verificationMap.get(claim.id);
+        const item = verificationMap.get(String(claim.id));
+        if ((resultCounts.get(String(claim.id)) || 0) > 1) {
+            return buildVerificationFailure(claim, "DUPLICATE_MODEL_RESULT", "The model returned more than one verification record for this claim.");
+        }
 
         if (item?.__verificationError) {
             return buildVerificationFailure(claim, item.__verificationError.code, item.__verificationError.message);
@@ -287,11 +308,20 @@ Return ONLY this JSON object:
         const maxEvidence = CONFIG.MAX_EVIDENCE_SOURCES_PER_CLAIM || 3;
         const validatedEvidence = validateEvidenceEntries(item.evidence, sourceMap, maxEvidence);
         const assertionResults = [];
+        if (claim.isCompound && (!Array.isArray(claim.subAssertions) || claim.subAssertions.length === 0)) {
+            return buildVerificationFailure(claim, "COMPOUND_ASSERTIONS_MISSING", "The extracted compound claim did not contain separate assertions to verify.");
+        }
+        if (claim.isCompound && !Array.isArray(item.assertionResults)) {
+            return buildVerificationFailure(claim, "ASSERTION_RESULTS_MISSING", "The verifier did not return assertion-level results for a compound claim.");
+        }
         if (Array.isArray(item.assertionResults)) {
             for (const assertion of item.assertionResults) {
                 const assertionText = assertion?.assertion ?? assertion?.text;
                 if (typeof assertionText !== "string" || !assertionText.trim() || !VALID_STATUSES.includes(assertion?.status)) {
                     return buildVerificationFailure(claim, "INVALID_ASSERTION_RESULT", "An assertion-level result was missing its text or had an invalid status.");
+                }
+                if (claim.isCompound && !claim.subAssertions.some((expected) => normalizeText(expected) === normalizeText(assertionText))) {
+                    return buildVerificationFailure(claim, "ASSERTION_IDENTITY_MISMATCH", "An assertion-level result did not match an extracted sub-assertion.");
                 }
                 const assertionEvidence = validateEvidenceEntries(assertion.evidence, sourceMap, maxEvidence);
                 const assertionStatus = assertion.status !== CONFIG.STATUSES.INSUFFICIENT_EVIDENCE && assertionEvidence.length === 0
