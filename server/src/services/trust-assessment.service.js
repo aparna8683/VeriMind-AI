@@ -215,7 +215,8 @@ function getMethodologyDescription() {
         supportRate: "Percentage of valid claim determinations classified as supported. Technical failures and malformed records are excluded and reported separately.",
         partialSupportRate: "Percentage of claims with partial evidence corroboration.",
         contradictionRate: "Percentage of claims directly refuted by retrieved evidence.",
-        unresolvedRate: "Percentage of claims where retrieved sources provide insufficient evidence.",
+        unresolvedRate: "Percentage of valid claim determinations where retrieved sources provide insufficient evidence.",
+        technicalFailureRate: "Technical, missing, malformed, duplicate, or unmapped verification outcomes divided by the expected extracted claim count.",
         traceabilityRate: "Percentage of valid claim determinations with at least one validated excerpt quote linked to a source URL. Technical failures are excluded from this denominator and reported separately."
     };
 }
