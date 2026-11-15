@@ -7,6 +7,27 @@ const VALID_STATUSES = [
     CONFIG.STATUSES.CONTRADICTED,
     CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
 ];
+const STOP_WORDS = new Set(["the","and","for","that","with","from","this","these","those","was","were","are","is","has","have","had","will","can","could","should","would","into","than","then","their","they","them","about","which","what","when","where","how","why","who","also","more","most","some","many","such","over","under","between","among","through","based","using","used","including","according"]);
+const tokenize = (value) => (typeof value === "string" ? value : "").toLowerCase().match(/[a-z0-9]{3,}/g) || [];
+export function selectSourcesForClaim(claim, sources, limit = CONFIG.MAX_EVIDENCE_SOURCES_PER_CLAIM || 3) {
+    const terms = [...new Set(tokenize(claim?.text).filter((word) => !STOP_WORDS.has(word)))];
+    const ranked = sources.map((source) => {
+        const titleTokens = new Set(tokenize(source.title));
+        const contentTokens = new Set(tokenize(source.content));
+        const score = terms.reduce((total, term) => {
+            const documentFrequency = sources.filter((candidate) => tokenize((candidate.title || "") + " " + (candidate.content || "")).includes(term)).length;
+            const specificity = Math.log(1 + sources.length / Math.max(1, documentFrequency));
+            return total + (titleTokens.has(term) ? 3 : contentTokens.has(term) ? 1 : 0) * specificity;
+        }, 0);
+        return { source, score };
+    }).sort((a, b) => b.score - a.score);
+    const lexicalMatches = ranked.filter((entry) => entry.score > 0);
+    if (lexicalMatches.length) return lexicalMatches.slice(0, limit).map((entry) => entry.source);
+    return ranked.filter((entry) => Number.isFinite(entry.source.score) && entry.source.score > 0).sort((a, b) => b.source.score - a.source.score).slice(0, limit).map((entry) => entry.source);
+}
+function isAbsenceAssertion(text) {
+    return /(?:\b(?:doesn\x27t|does not|didn\x27t|did not|fails? to|without)\s+(?:mention|provide|report|include|contain|offer)\b|\bno\s+(?:(?:direct|comparative|relevant)\s+)*(?:data|evidence|information|reporting|comparison)\b|\babsence of\s+(?:data|evidence|information)\b)/i.test(text || "");
+}
 
 /**
  * Normalizes text for robust excerpt matching (collapsing whitespace, lowercasing, stripping smart quotes).
@@ -54,13 +75,13 @@ function buildVerificationFailure(claim, code, message) {
     };
 }
 
-function validateEvidenceEntries(entries, sourceMap, maxEvidence) {
+function validateEvidenceEntries(entries, sourceMap, maxEvidence, allowedSourceIds = null) {
     const validated = [];
     const seen = new Set();
     for (const entry of Array.isArray(entries) ? entries : []) {
         if (!entry || typeof entry.excerpt !== "string") continue;
         const source = sourceMap.get(String(entry.sourceId)) || sourceMap.get(entry.sourceId);
-        if (!source || !isExcerptInSource(entry.excerpt, source.content)) continue;
+        if (!source || (allowedSourceIds && !allowedSourceIds.has(source.id)) || !isExcerptInSource(entry.excerpt, source.content)) continue;
         const key = String(entry.sourceId) + ":" + normalizeText(entry.excerpt);
         if (seen.has(key)) continue;
         seen.add(key);
@@ -102,7 +123,7 @@ function deriveAssertionStatus(assertions) {
     return CONFIG.STATUSES.INSUFFICIENT_EVIDENCE;
 }
 
-export function normalizeVerificationItem(claim, item, sources = []) {
+export function normalizeVerificationItem(claim, item, sources = [], allowedSourceIds = null) {
     if (!claim || typeof claim.id !== "string" || !claim.id.trim() ||
         typeof claim.text !== "string" || !claim.text.trim()) {
         return buildVerificationFailure(claim || { id: null, text: "" }, "INVALID_CLAIM_INPUT", "The extracted claim is missing a stable ID or non-empty text.");
@@ -115,7 +136,7 @@ export function normalizeVerificationItem(claim, item, sources = []) {
         .filter((source) => source && source.id != null)
         .map((source) => [source.id, source]));
     const maxEvidence = CONFIG.MAX_EVIDENCE_SOURCES_PER_CLAIM || 3;
-    const validatedEvidence = validateEvidenceEntries(item.evidence, sourceMap, maxEvidence);
+    const validatedEvidence = validateEvidenceEntries(item.evidence, sourceMap, maxEvidence, allowedSourceIds);
     const assertionResults = [];
 
     if (claim.isCompound && (!Array.isArray(claim.subAssertions) || claim.subAssertions.length === 0)) {
@@ -141,15 +162,16 @@ export function normalizeVerificationItem(claim, item, sources = []) {
             if (claim.isCompound && !claim.subAssertions.some((expected) => normalizeText(expected) === normalizeText(assertionText))) {
                 return buildVerificationFailure(claim, "ASSERTION_IDENTITY_MISMATCH", "An assertion-level result did not match an extracted sub-assertion.");
             }
-            const assertionEvidence = validateEvidenceEntries(assertion.evidence, sourceMap, maxEvidence);
-            const assertionStatus = assertion.status !== CONFIG.STATUSES.INSUFFICIENT_EVIDENCE && assertionEvidence.length === 0
+            const assertionEvidence = validateEvidenceEntries(assertion.evidence, sourceMap, maxEvidence, allowedSourceIds);
+            let assertionStatus = assertion.status !== CONFIG.STATUSES.INSUFFICIENT_EVIDENCE && assertionEvidence.length === 0
                 ? CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
                 : assertion.status;
+            if (isAbsenceAssertion(assertionText) && assertionStatus === CONFIG.STATUSES.SUPPORTED && assertion.evidenceState !== "source_explicitly_states_absence") assertionStatus = CONFIG.STATUSES.INSUFFICIENT_EVIDENCE;
             assertionResults.push({
                 assertion: assertionText.trim(),
                 status: assertionStatus,
                 evidence: assertionEvidence,
-                evidenceState: assertionEvidence.length > 0 ? "validated_excerpt_found" : "not_found_in_retrieved_excerpts",
+                evidenceState: isAbsenceAssertion(assertionText) && assertionStatus === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE ? "not_found_in_retrieved_excerpts" : assertion.evidenceState === "source_explicitly_states_absence" && assertionEvidence.length > 0 ? "source_explicitly_states_absence" : assertionEvidence.length > 0 ? "validated_excerpt_found" : "not_found_in_retrieved_excerpts",
                 rationale: buildFinalRationale(assertionStatus, assertionEvidence.length)
             });
         }
@@ -168,6 +190,7 @@ export function normalizeVerificationItem(claim, item, sources = []) {
     if (finalStatus !== CONFIG.STATUSES.INSUFFICIENT_EVIDENCE && finalEvidence.length === 0) {
         finalStatus = CONFIG.STATUSES.INSUFFICIENT_EVIDENCE;
     }
+    if (!claim.isCompound && isAbsenceAssertion(claim.text) && finalStatus === CONFIG.STATUSES.SUPPORTED && item.evidenceState !== "source_explicitly_states_absence") finalStatus = CONFIG.STATUSES.INSUFFICIENT_EVIDENCE;
 
     const isFlagged =
         finalStatus === CONFIG.STATUSES.CONTRADICTED ||
@@ -219,7 +242,7 @@ export function normalizeVerificationItem(claim, item, sources = []) {
  * Verifies extracted claims against retrieved web evidence.
  * Batches claims to stay within LLM token limits and validates all returned excerpts.
  */
-export async function verifyClaims(claims, sources) {
+export async function verifyClaims(claims, sources, { generateJson = generateJsonWithGroq } = {}) {
     if (!Array.isArray(claims) || claims.length === 0) {
         return {
             totalClaims: 0,
@@ -269,47 +292,19 @@ export async function verifyClaims(claims, sources) {
 
     const sourceMap = new Map(sources.map((s) => [s.id, s]));
 
-    // Keep verification prompts small: rank sources lexically for each claim,
-    // then send only the best few excerpts instead of every retrieved page.
-    const STOP_WORDS = new Set([
-        "the", "and", "for", "that", "with", "from", "this", "these", "those",
-        "was", "were", "are", "is", "has", "have", "had", "will", "can", "could",
-        "should", "would", "into", "than", "then", "their", "they", "them",
-        "about", "which", "what", "when", "where", "how", "why", "who", "also",
-        "more", "most", "some", "many", "such", "over", "under", "between",
-        "among", "through", "based", "using", "used", "including", "according"
-    ]);
-
-    const tokenize = (value) => (value || "")
-        .toLowerCase()
-        .match(/[a-z0-9]{3,}/g) || [];
-
-    function rankSourcesForClaim(claim) {
-        const terms = [...new Set(tokenize(claim.text).filter((word) => !STOP_WORDS.has(word)))];
-        return sources.map((source) => {
-            const titleTokens = new Set(tokenize(source.title));
-            const contentTokens = new Set(tokenize(source.content));
-            const score = terms.reduce((total, term) =>
-                total + (titleTokens.has(term) ? 3 : contentTokens.has(term) ? 1 : 0), 0);
-            return { source, score };
-        })
-        .filter((entry) => entry.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, CONFIG.MAX_EVIDENCE_SOURCES_PER_CLAIM || 3)
-        .map((entry) => entry.source);
-    }
-
+    // Keep prompts bounded and isolate each claim to its own selected source IDs.
     const batchSize = 2;
     const allResults = [];
+    const allowedSourceIdsByClaim = new Map();
 
     for (let i = 0; i < claims.length; i += batchSize) {
         const batch = claims.slice(i, i + batchSize);
         const relevantSources = new Map();
 
         for (const claim of batch) {
-            for (const source of rankSourcesForClaim(claim)) {
-                relevantSources.set(source.id, source);
-            }
+            const selectedForClaim = selectSourcesForClaim(claim, sources);
+            allowedSourceIdsByClaim.set(claim.id, new Set(selectedForClaim.map((source) => source.id)));
+            for (const source of selectedForClaim) relevantSources.set(source.id, source);
         }
 
         const selectedSources = [...relevantSources.values()];
@@ -323,10 +318,14 @@ export async function verifyClaims(claims, sources) {
         const prompt = `
 You are the Claim Verification Agent for VeriMind AI.
 
-Evaluate each claim using ONLY the supplied web evidence. Do not use outside knowledge.
+Evaluate each claim using ONLY its allowed source IDs in the supplied web evidence. Do not use outside knowledge.
+For claims that say a source does not mention or provide something, an excerpt that merely omits it is NOT proof.
+Use evidenceState "not_found_in_retrieved_excerpts" when absent from these excerpts. Only use
+"source_explicitly_states_absence" when the source itself explicitly states the absence and you quote that text.
+Never imply a complete source was checked when only an excerpt was supplied.
 
 CLAIMS:
-${JSON.stringify(batch)}
+${JSON.stringify(batch.map((claim) => ({ ...claim, allowedSourceIds: [...(allowedSourceIdsByClaim.get(claim.id) || [])] })))}
 
 EVIDENCE:
 ${JSON.stringify(evidenceForModel)}
@@ -338,7 +337,9 @@ RULES:
 - "insufficient_evidence" means the supplied text does not prove or disprove it.
 - Related keywords or a source discussing the same topic are not proof.
 - Every evidence excerpt must be a verbatim passage copied from the supplied source content.
-- Return sourceId values only from the supplied evidence IDs.
+- Return sourceId values only from the claim allowedSourceIds.
+- Positive support and contradiction require a directly relevant verbatim excerpt.
+- Do not infer source-wide absence from this retrieved excerpt set.
 - If there are no relevant sources or no direct quotation, use insufficient_evidence.
 - Keep rationale concise (one or two sentences).
 - For every compound claim, return one assertionResults item for each supplied subAssertion, preserving its exact text.
@@ -396,7 +397,7 @@ Return ONLY this JSON object:
         }
 
         try {
-            const result = await generateJsonWithGroq(prompt);
+            const result = await generateJson(prompt);
             if (result && Array.isArray(result.verifications)) {
                 allResults.push(...result.verifications);
             } else {
@@ -431,7 +432,7 @@ Return ONLY this JSON object:
         if (item?.__verificationError) {
             return buildVerificationFailure(claim, item.__verificationError.code, item.__verificationError.message);
         }
-        return normalizeVerificationItem(claim, item, sources);
+        return normalizeVerificationItem(claim, item, sources, allowedSourceIdsByClaim.get(claim.id) || new Set());
     });
 
     const summary = {
