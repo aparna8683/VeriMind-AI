@@ -30,7 +30,7 @@ export async function researchQuestion(query, options = {}) {
     return data;
 }
 
-export async function reverifyClaim(claimId, claimText, sources = []) {
+export async function reverifyClaim(claimId, claimText, sources = [], reportContext = {}) {
     if (!claimId || !claimText) {
         throw new Error("claimId and claimText are required for re-verification.");
     }
@@ -43,7 +43,9 @@ export async function reverifyClaim(claimId, claimText, sources = []) {
         body: JSON.stringify({
             claimId,
             claimText,
-            sources
+            sources,
+            verifications: reportContext.verifications || [],
+            claims: reportContext.claims || []
         })
     });
 

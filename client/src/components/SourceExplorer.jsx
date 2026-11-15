@@ -165,13 +165,17 @@ export function SourceExplorer({ sources = [], verifications = [] }) {
 function CategoryBadge({ category, label }) {
     switch (category) {
         case "government_institutional":
+        case "government_public_health":
             return (
                 <span className="category-badge cat-gov">
                     <Building2 size={12} />
                     <span>{label || "Government / Institutional"}</span>
                 </span>
             );
+        case "peer_reviewed_research":
+        case "academic_publisher":
         case "academic_research":
+        case "professional_medical_association":
             return (
                 <span className="category-badge cat-academic">
                     <BookOpen size={12} />
@@ -186,6 +190,7 @@ function CategoryBadge({ category, label }) {
                 </span>
             );
         case "independent_journalism":
+        case "reputable_journalism":
             return (
                 <span className="category-badge cat-news">
                     <Newspaper size={12} />
@@ -200,10 +205,25 @@ function CategoryBadge({ category, label }) {
                 </span>
             );
         case "company_vendor_blog":
+        case "commercial_health_website":
             return (
                 <span className="category-badge cat-blog">
                     <Globe size={12} />
                     <span>{label || "Vendor / Commercial"}</span>
+                </span>
+            );
+        case "healthcare_organization":
+            return (
+                <span className="category-badge cat-gov">
+                    <Building2 size={12} />
+                    <span>{label || "Healthcare Organization"}</span>
+                </span>
+            );
+        case "personal_blog_forum":
+            return (
+                <span className="category-badge cat-other">
+                    <Globe size={12} />
+                    <span>{label || "Personal Blog / Forum"}</span>
                 </span>
             );
         case "other_unknown":

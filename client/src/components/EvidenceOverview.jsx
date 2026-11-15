@@ -30,6 +30,7 @@ export function EvidenceOverview({ trustAssessment, sourcesCount = 0 }) {
         partiallySupported = 0,
         contradicted = 0,
         insufficientEvidence = 0,
+        technicalFailures = 0,
         traceableClaims = 0,
         supportRate = 0,
         partialSupportRate = 0,
@@ -104,6 +105,17 @@ export function EvidenceOverview({ trustAssessment, sourcesCount = 0 }) {
                     <div className="stat-subtext">{unresolvedRate}% insufficient evidence</div>
                 </div>
 
+                {technicalFailures > 0 && (
+                    <div className="stat-card stat-danger" role="status">
+                        <div className="stat-card-header">
+                            <span className="stat-label">Verification Failed</span>
+                            <AlertTriangle size={18} className="stat-icon text-danger" />
+                        </div>
+                        <div className="stat-value text-danger">{technicalFailures}</div>
+                        <div className="stat-subtext">Not a factual determination</div>
+                    </div>
+                )}
+
                 <div className="stat-card">
                     <div className="stat-card-header">
                         <span className="stat-label">Traceability</span>
@@ -119,11 +131,11 @@ export function EvidenceOverview({ trustAssessment, sourcesCount = 0 }) {
                         <Globe2 size={18} className="stat-icon text-muted" />
                     </div>
                     <div className="stat-value">
-                        {sourcesCount}
-                        <span className="stat-secondary"> / {sourceDiversity?.uniqueDomainsCount || 1} domains</span>
+                        {sourceDiversity?.totalSources ?? sourcesCount}
+                        <span className="stat-secondary"> sources / {sourceDiversity?.uniqueDomainsCount ?? 0} domains</span>
                     </div>
                     <div className="stat-subtext">
-                        {sourceDiversity?.primarySourcesCount || 0} institutional / primary
+                        {sourceDiversity?.primaryResearchSourcesCount ?? sourceDiversity?.primarySourcesCount ?? 0} likely primary research · {sourceDiversity?.institutionalSourcesCount ?? 0} institutional · {sourceDiversity?.commercialSourcesCount ?? 0} commercial
                     </div>
                 </div>
             </div>

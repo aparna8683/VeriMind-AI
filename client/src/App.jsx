@@ -21,6 +21,8 @@ import {
     deleteHistoryItem,
     clearResearchHistory
 } from "./utils/history";
+import { normalizeResearchReport } from "./utils/report";
+import { applyReverificationResult } from "./utils/reverification";
 
 import "./App.css";
 
@@ -86,10 +88,11 @@ export function App() {
 
         try {
             const data = await researchQuestion(q.trim(), { bypassCache });
-            setResult(data);
+            const normalizedData = normalizeResearchReport(data);
+            setResult(normalizedData);
 
             // Save to local research history
-            const updated = saveResearchReport(data);
+            const updated = saveResearchReport(normalizedData);
             setHistory(updated || getResearchHistory());
 
             // Refresh session usage
@@ -115,23 +118,32 @@ export function App() {
 
         setReverifyingClaimId(claimId);
 
+        const persistReport = (updatedResult) => {
+            setResult(updatedResult);
+            saveResearchReport(updatedResult);
+            setHistory(getResearchHistory());
+        };
+        const markAttemptFailed = (code, message) => {
+            const merged = applyReverificationResult(result.verification?.verifications, claimId, claimText, {
+                success: false,
+                attempt: { status: "failed", code, message }
+            });
+            if (merged.updated) {
+                persistReport({ ...result, verification: { ...result.verification, verifications: merged.verifications } });
+                loadUsage();
+            }
+        };
+
         try {
-            const reverifyRes = await reverifyClaim(claimId, claimText, result.sources || []);
+            const reverifyRes = await reverifyClaim(claimId, claimText, result.sources || [], {
+                verifications: result.verification?.verifications || [],
+                claims: result.claims?.claims || []
+            });
+            const updatedVerification = reverifyRes.verification;
+            const merged = applyReverificationResult(result.verification?.verifications, claimId, claimText, reverifyRes);
 
-            if (reverifyRes.success && reverifyRes.verification) {
+            if (merged.succeeded) {
                 // Update claim in verification list
-                const updatedVerifications = (result.verification?.verifications || []).map((item) => {
-                    if (item.claimId === claimId) {
-                        return {
-                            ...reverifyRes.verification,
-                            reverified: true,
-                            originalStatus: item.status,
-                            statusChanged: item.status !== reverifyRes.verification.status
-                        };
-                    }
-                    return item;
-                });
-
                 // Update sources if new sources were added
                 const updatedSources = reverifyRes.allSources || result.sources;
 
@@ -140,17 +152,20 @@ export function App() {
                     sources: updatedSources,
                     verification: {
                         ...result.verification,
-                        verifications: updatedVerifications
-                    }
+                        summary: reverifyRes.verificationSummary || result.verification?.summary,
+                        verifications: merged.verifications
+                    },
+                    trustAssessment: reverifyRes.trustAssessment || result.trustAssessment
                 };
 
-                setResult(updatedResult);
-                saveResearchReport(updatedResult);
-                setHistory(getResearchHistory());
+                persistReport(updatedResult);
+                loadUsage();
+            } else if (merged.updated) {
+                persistReport({ ...result, verification: { ...result.verification, verifications: merged.verifications } });
                 loadUsage();
             }
-        } catch (err) {
-            alert(`Re-verification notice: ${err.message}`);
+        } catch {
+            markAttemptFailed("REVERIFICATION_REQUEST_FAILED", "Re-verification request failed; the previous verification result was kept.");
         } finally {
             setReverifyingClaimId(null);
         }
@@ -158,7 +173,7 @@ export function App() {
 
     function handleSelectHistoryItem(historyItem) {
         if (historyItem.fullReport) {
-            setResult(historyItem.fullReport);
+            setResult(normalizeResearchReport(historyItem.fullReport));
             setQuery(historyItem.query);
             setIsHistoryOpen(false);
             window.scrollTo({ top: 0, behavior: "smooth" });
@@ -212,6 +227,15 @@ export function App() {
                 {/* When an active report exists, show the report and verification sections */}
                 {result && (
                     <div className="report-view-container">
+                        {result.dataIntegrityIssues?.length > 0 && (
+                            <div className="error-banner" role="alert">
+                                <strong>Report data integrity warning</strong>
+                                <ul>{result.dataIntegrityIssues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>
+                                {result.unmappedVerifications?.length > 0 && (
+                                    <p>{result.unmappedVerifications.length} unmapped verification record(s) were excluded from claim review and trust metrics.</p>
+                                )}
+                            </div>
+                        )}
                         {/* 1. Synthesized Research Report */}
                         <ResearchReport
                             report={result}
@@ -219,10 +243,12 @@ export function App() {
                         />
 
                         {/* 2. Evidence Overview & Trust Assessment */}
-                        <EvidenceOverview
-                            trustAssessment={result.trustAssessment}
-                            sourcesCount={result.sources?.length || 0}
-                        />
+                        {!result.dataIntegrityIssues?.length && (
+                            <EvidenceOverview
+                                trustAssessment={result.trustAssessment}
+                                sourcesCount={result.sources?.length || 0}
+                            />
+                        )}
 
                         {/* 3. Human-in-the-Loop Review Panel */}
                         <HumanReviewPanel

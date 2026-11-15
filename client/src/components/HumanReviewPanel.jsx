@@ -28,6 +28,8 @@ export function HumanReviewPanel({
             item.status === "contradicted" ||
             item.status === "insufficient_evidence" ||
             item.status === "partially_supported" ||
+            item.status === "verification_error" ||
+            item.reverificationAttempt?.status === "failed" ||
             item.isCompound ||
             item.reviewNeeded
         );
@@ -98,6 +100,7 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                         const isContradicted = item.status === "contradicted";
                         const isInsufficient = item.status === "insufficient_evidence";
                         const isPartial = item.status === "partially_supported";
+                        const isVerificationError = item.status === "verification_error";
                         const isCollapsed = collapsedIds.has(item.claimId);
                         const isReverifying = reverifyingClaimId === item.claimId;
 
@@ -118,7 +121,9 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                                         {item.isCompound && (
                                             <span className="badge badge-compound">Compound Statement</span>
                                         )}
-                                        {item.reverified && (
+                                        {item.reverificationAttempt?.status === "failed" ? (
+                                            <span className="badge badge-warning" title={item.reverificationAttempt.message}>Retry failed; previous result kept</span>
+                                        ) : item.reverified && (
                                             <span className="badge badge-reverified">Re-verified</span>
                                         )}
                                     </div>
@@ -134,16 +139,16 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                                             <span>{copiedId === item.claimId ? "Copied" : "Copy Checklist"}</span>
                                         </button>
 
-                                        {onReverifyClaim && isInsufficient && (
+                                        {onReverifyClaim && (isInsufficient || isVerificationError) && (
                                             <button
                                                 type="button"
                                                 className="btn btn-secondary btn-xs"
                                                 onClick={() => onReverifyClaim(item.claimId, item.claim)}
-                                                disabled={isReverifying}
+                                                disabled={isReverifying || !item.claim?.trim()}
                                                 title="Perform focused search on this claim"
                                             >
                                                 <RefreshCw size={12} className={isReverifying ? "spin" : ""} />
-                                                <span>{isReverifying ? "Searching..." : "Targeted Re-Search"}</span>
+                                                <span>{isReverifying ? "Searching..." : isVerificationError ? "Retry Verification" : "Targeted Re-Search"}</span>
                                             </button>
                                         )}
 
@@ -161,7 +166,9 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                                 {/* 1. What the claim says */}
                                 <div className="review-claim-statement">
                                     <span className="label-caption">ASSERTED CLAIM:</span>
-                                    <blockquote className="claim-quote">“{item.claim}”</blockquote>
+                                    {item.claim?.trim()
+                                        ? <blockquote className="claim-quote">“{item.claim}”</blockquote>
+                                        : <p role="alert">Claim text is missing from this saved report. Re-run the research to restore this audit item.</p>}
                                 </div>
 
                                 {!isCollapsed && (
@@ -172,7 +179,9 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                                                 <AlertCircle size={13} />
                                                 <span>Why it requires review</span>
                                             </div>
-                                            <p>{item.reviewReason || item.rationale}</p>
+                                            <p>{isVerificationError
+                                                ? item.verificationError?.message || item.rationale || "The verification process failed; this is not a factual conclusion."
+                                                : item.reviewReason || item.rationale}</p>
                                         </div>
 
                                         {/* 3. What evidence is currently available */}

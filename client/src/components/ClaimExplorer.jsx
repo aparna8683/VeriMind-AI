@@ -31,7 +31,8 @@ export function ClaimExplorer({
         supported: verifications.filter((v) => v.status === "supported").length,
         partially_supported: verifications.filter((v) => v.status === "partially_supported").length,
         contradicted: verifications.filter((v) => v.status === "contradicted").length,
-        insufficient_evidence: verifications.filter((v) => v.status === "insufficient_evidence").length
+        insufficient_evidence: verifications.filter((v) => v.status === "insufficient_evidence").length,
+        verification_error: verifications.filter((v) => v.status === "verification_error").length
     };
 
     const filteredClaims = verifications.filter((item) => {
@@ -144,6 +145,15 @@ export function ClaimExplorer({
                     >
                         Insufficient Evidence <span className="tab-count">{counts.insufficient_evidence}</span>
                     </button>
+                    {counts.verification_error > 0 && (
+                        <button
+                            type="button"
+                            className={`tab-btn tab-unresolved ${filterStatus === "verification_error" ? "active" : ""}`}
+                            onClick={() => setFilterStatus("verification_error")}
+                        >
+                            Verification Failed <span className="tab-count">{counts.verification_error}</span>
+                        </button>
+                    )}
                 </div>
 
                 <div className="search-filter-input">
@@ -183,7 +193,9 @@ export function ClaimExplorer({
                                                 Compound Claim
                                             </span>
                                         )}
-                                        {item.reverified && (
+                                        {item.reverificationAttempt?.status === "failed" ? (
+                                            <span className="badge badge-warning" title={item.reverificationAttempt.message}>Retry failed; previous result kept</span>
+                                        ) : item.reverified && (
                                             <span className="badge badge-reverified" title="Re-evaluated with targeted search">
                                                 Re-verified
                                             </span>
@@ -234,20 +246,32 @@ export function ClaimExplorer({
                                         {/* Rationale explanation */}
                                         <div className="claim-rationale-box">
                                             <strong>Verification Rationale:</strong>
-                                            <p>{item.rationale}</p>
+                                            <p>{item.status === "verification_error"
+                                                ? item.verificationError?.message || item.rationale || "Verification failed; no factual conclusion was reached."
+                                                : item.rationale}</p>
                                         </div>
 
                                         {/* Sub-assertions if compound */}
-                                        {item.subAssertions && item.subAssertions.length > 0 && (
+                                        {item.assertionResults?.length > 0 ? (
                                             <div className="sub-assertions-box">
-                                                <span className="box-sublabel">Identified Sub-Assertions:</span>
+                                                <span className="box-sublabel">Assertion-Level Results:</span>
                                                 <ul>
-                                                    {item.subAssertions.map((sub, idx) => (
-                                                        <li key={idx}>{sub}</li>
+                                                    {item.assertionResults.map((assertion, idx) => (
+                                                        <li key={idx}>
+                                                            <strong>{assertion.status.replaceAll("_", " ")}</strong>: {assertion.assertion}
+                                                            {assertion.evidenceState === "not_found_in_retrieved_excerpts" && (
+                                                                <span> — Not established by the retrieved excerpts; this does not show the information is absent from the full source.</span>
+                                                            )}
+                                                        </li>
                                                     ))}
                                                 </ul>
                                             </div>
-                                        )}
+                                        ) : item.subAssertions?.length > 0 ? (
+                                            <div className="sub-assertions-box">
+                                                <span className="box-sublabel">Identified Sub-Assertions:</span>
+                                                <ul>{item.subAssertions.map((sub, idx) => <li key={idx}>{sub}</li>)}</ul>
+                                            </div>
+                                        ) : null}
 
                                         {/* Evidence list */}
                                         <div className="claim-evidence-section">
@@ -321,6 +345,13 @@ function StatusBadge({ status }) {
                 <span className="status-badge status-contradicted">
                     <XCircle size={13} />
                     <span>CONTRADICTED</span>
+                </span>
+            );
+        case "verification_error":
+            return (
+                <span className="status-badge status-error" role="status">
+                    <HelpCircle size={13} />
+                    <span>VERIFICATION FAILED</span>
                 </span>
             );
         case "insufficient_evidence":

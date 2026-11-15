@@ -768,6 +768,12 @@ a:hover {
     border: 1px solid var(--border-subtle);
 }
 
+.badge-warning {
+    background-color: var(--status-insufficient-bg);
+    color: var(--status-insufficient);
+    border: 1px solid var(--status-insufficient-border);
+}
+
 .report-timestamp {
     display: flex;
     align-items: center;
@@ -1327,6 +1333,12 @@ a:hover {
     border: 1px solid var(--status-partial-border);
 }
 
+.status-verification_error, .status-error {
+    background-color: var(--status-contradicted-bg);
+    color: var(--status-contradicted);
+    border: 1px solid var(--status-contradicted-border);
+}
+
 .review-card-actions {
     display: flex;
     align-items: center;
@@ -1518,6 +1530,7 @@ a:hover {
 .status-border-partially_supported { border-left: 3px solid var(--status-partial); }
 .status-border-contradicted { border-left: 3px solid var(--status-contradicted); }
 .status-border-insufficient_evidence { border-left: 3px solid var(--status-insufficient); }
+.status-border-verification_error { border-left: 3px solid var(--status-contradicted); }
 
 .claim-card-header {
     display: flex;
