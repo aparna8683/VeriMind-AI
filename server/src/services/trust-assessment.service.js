@@ -42,12 +42,12 @@ export function buildTrustAssessment(verification, sourceDiversity = null, extra
     for (const item of records) {
         if (!item || typeof item.claimId !== "string" || !item.claimId.trim() ||
             typeof item.claim !== "string" || !item.claim.trim()) {
-            technicalFailures++;
+            if (!hasExpectedClaims) technicalFailures++;
             invalidRecords++;
             continue;
         }
         if (seenIds.has(item.claimId)) {
-            technicalFailures++;
+            if (!hasExpectedClaims) technicalFailures++;
             invalidRecords++;
             continue;
         }
@@ -56,7 +56,6 @@ export function buildTrustAssessment(verification, sourceDiversity = null, extra
         if (hasExpectedClaims) {
             const expected = expectedById.get(item.claimId);
             if (!expected || expected.text !== item.claim.trim()) {
-                technicalFailures++;
                 invalidRecords++;
                 continue;
             }
