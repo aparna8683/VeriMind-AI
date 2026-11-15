@@ -247,6 +247,7 @@ export function App() {
                             <EvidenceOverview
                                 trustAssessment={result.trustAssessment}
                                 sourcesCount={result.sources?.length || 0}
+                                sourceFreshness={result.sourceFreshness || null}
                             />
                         )}
 
