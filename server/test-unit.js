@@ -9,7 +9,7 @@ import {
     isExcerptInSource,
     selectSourcesForClaim
 } from "./src/agents/claim-verifier.agent.js";
-import { buildVerificationQualification } from "./src/services/research.service.js";
+import { buildVerificationQualification, reverifySpecificClaim } from "./src/services/research.service.js";
 
 console.log("=========================================");
 console.log(" Running VeriMind AI Backend Unit Tests ");
@@ -25,6 +25,18 @@ function test(name, fn) {
         
 
 console.log(`[PASS] ${name}`);
+        passed++;
+    } catch (err) {
+        console.error(`[FAIL] ${name}`);
+        console.error("  ", err.message);
+    }
+}
+
+async function testAsync(name, fn) {
+    total++;
+    try {
+        await fn();
+        console.log(`[PASS] ${name}`);
         passed++;
     } catch (err) {
         console.error(`[FAIL] ${name}`);
@@ -333,6 +345,25 @@ test("absence claims require a source that explicitly states the absence", () =>
     assert.strictEqual(result.assertionResults[0].evidenceState, "not_found_in_retrieved_excerpts");
 });
 
+
+test("trust assessment detects missing results against the expected extracted claim set", () => {
+    const assessment = buildTrustAssessment({
+        verifications: [
+            { claimId: "C1", claim: "Fact one.", status: "supported", evidence: [{ sourceId: 1, excerpt: "verified quote" }] },
+            { claimId: "C3", claim: "Fact three.", status: "verification_error", evidence: [] }
+        ]
+    }, null, [
+        { id: "C1", text: "Fact one." },
+        { id: "C2", text: "Fact two." },
+        { id: "C3", text: "Fact three." }
+    ]);
+    assert.strictEqual(assessment.metrics.expectedClaims, 3);
+    assert.strictEqual(assessment.metrics.totalClaims, 1);
+    assert.strictEqual(assessment.metrics.supported, 1);
+    assert.strictEqual(assessment.metrics.technicalFailures, 2);
+    assert.strictEqual(assessment.assessment, "limited");
+});
+
 test("final narrative qualification reflects unresolved claim verification", () => {
     const note = buildVerificationQualification({
         summary: { supported: 3, partiallySupported: 0, contradicted: 0, insufficientEvidence: 7, technicalFailures: 0 },
@@ -357,6 +388,52 @@ test("even fully supported claim audits are not described as factual certainty",
         verifications: []
     });
     assert.match(note, /not factual certainty/);
+});
+
+
+await testAsync("manual reverification reports search failures without replacing the prior result", async () => {
+    const result = await reverifySpecificClaim(
+        "C1",
+        "A real extracted claim.",
+        [],
+        {
+            claims: [{ id: "C1", text: "A real extracted claim." }],
+            verifications: [{ claimId: "C1", claim: "A real extracted claim.", status: "insufficient_evidence", evidence: [] }]
+        },
+        {
+            searchWeb: async () => { throw new Error("Tavily unavailable"); },
+            verifyClaims: async () => { throw new Error("Verification should not run"); }
+        }
+    );
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.attempt.status, "failed");
+    assert.strictEqual(result.verification, null);
+});
+
+await testAsync("manual reverification validates report identity and recalculates trust metrics", async () => {
+    const excerpt = "A real extracted claim is supported by this source.";
+    const result = await reverifySpecificClaim(
+        "C1",
+        "A real extracted claim.",
+        [],
+        {
+            claims: [{ id: "C1", text: "A real extracted claim." }],
+            verifications: [{ claimId: "C1", claim: "A real extracted claim.", status: "insufficient_evidence", evidence: [] }]
+        },
+        {
+            searchWeb: async () => ({ sources: [{ url: "https://example.org/source", title: "Source", content: excerpt }] }),
+            verifyClaims: async () => ({ verifications: [{
+                claimId: "C1",
+                claim: "A real extracted claim.",
+                status: "supported",
+                evidence: [{ sourceId: 1, excerpt }]
+            }] })
+        }
+    );
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.verification.status, "supported");
+    assert.strictEqual(result.trustAssessment.metrics.supportRate, 100);
+    assert.strictEqual(result.trustAssessment.metrics.expectedClaims, 1);
 });
 
 console.log(`\nResults: ${passed} of ${total} tests passed.`);
