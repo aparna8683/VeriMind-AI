@@ -51,10 +51,12 @@ export async function reverifyClaim(claimId, claimText, sources = [], reportCont
 
     const data = await response.json();
 
-    if (!response.ok || !data.success) {
-        throw new Error(data.message || "Targeted claim re-verification failed.");
+    if (!response.ok) {
+        throw new Error(data.message || "Targeted claim re-verification request failed.");
     }
 
+    // A structured verification failure is an expected result, not a transport error.
+    // Return it so the caller can preserve the previous claim result and show the failure reason.
     return data;
 }
 
