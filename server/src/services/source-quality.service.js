@@ -37,6 +37,11 @@ const CATEGORIES = {
         label: "Company / Commercial Blog",
         description: "Vendor-published articles, company press releases, marketing collateral, or sponsored content."
     },
+    SOCIAL_MEDIA: {
+        id: "social_media_user_generated",
+        label: "Social Media / User-Generated",
+        description: "Social network posts, video platforms, forums, or user-generated content; not treated as independent institutional evidence."
+    },
     OTHER_UNKNOWN: {
         id: "other_unknown",
         label: "General Web / Unclassified",
@@ -73,6 +78,11 @@ const INDUSTRY_DOMAINS = [
     "venturebeat.com", "engadget.com", "zdnet.com", "anandtech.com",
     "tomshardware.com", "infoq.com", "theregister.com", "technologyreview.com",
     "cio.com", "infoworld.com"
+];
+
+const SOCIAL_MEDIA_DOMAINS = [
+    "linkedin.com", "facebook.com", "youtube.com", "x.com", "twitter.com",
+    "reddit.com", "tiktok.com", "instagram.com"
 ];
 
 const DOCS_PATTERNS = [
@@ -150,6 +160,12 @@ export function assessSourceQuality(source) {
         reason = `Identified as a specialized technology or industry trade publication (${domain}).`;
         isPrimarySourceLikely = false;
     }
+    // Social platforms and user-generated content are identified separately.
+    else if (SOCIAL_MEDIA_DOMAINS.some((pattern) => domain === pattern || domain.endsWith(`.${pattern}`))) {
+        category = CATEGORIES.SOCIAL_MEDIA;
+        reason = `Identified as a social media or user-generated content platform (${domain}); posts are not treated as independent institutional evidence.`;
+        isPrimarySourceLikely = false;
+    }
     // Check Blog or Company Marketing
     else if (
         domain.includes("blog") ||
@@ -194,14 +210,28 @@ export function assessSources(sources = []) {
         categoriesCount[cat] = (categoriesCount[cat] || 0) + 1;
     });
 
+    const countCategory = (categoryId) =>
+        assessed.filter((source) => source.quality.category === categoryId).length;
+    const nonSocialDomains = new Set(
+        assessed
+            .filter((source) => source.quality.category !== CATEGORIES.SOCIAL_MEDIA.id)
+            .map((source) => source.quality.domain)
+            .filter(Boolean)
+    );
+
     return {
         sources: assessed,
         diversity: {
             totalSources: assessed.length,
             uniqueDomainsCount: uniqueDomains.size,
             uniqueDomains: Array.from(uniqueDomains),
+            uniqueNonSocialDomainsCount: nonSocialDomains.size,
             categoriesBreakdown: categoriesCount,
-            primarySourcesCount: assessed.filter((s) => s.quality.isPrimarySourceLikely).length
+            primarySourcesCount: assessed.filter((source) => source.quality.isPrimarySourceLikely).length,
+            academicResearchSourcesCount: countCategory(CATEGORIES.ACADEMIC_RESEARCH.id),
+            institutionalSourcesCount: countCategory(CATEGORIES.GOVERNMENT_INSTITUTIONAL.id),
+            commercialSourcesCount: countCategory(CATEGORIES.COMPANY_VENDOR_BLOG.id),
+            socialMediaSourcesCount: countCategory(CATEGORIES.SOCIAL_MEDIA.id)
         }
     };
 }
