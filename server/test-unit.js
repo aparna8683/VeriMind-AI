@@ -20,7 +20,23 @@ function test(name, fn) {
     total++;
     try {
         fn();
-        console.log(`[PASS] ${name}`);
+        
+test("social platforms are classified separately and excluded from primary-source counts", () => {
+    const result = assessSources([
+        { id: 1, url: "https://www.linkedin.com/posts/example", title: "LinkedIn post" },
+        { id: 2, url: "https://www.facebook.com/example", title: "Facebook post" },
+        { id: 3, url: "https://www.nature.com/articles/example", title: "Research article" },
+        { id: 4, url: "https://www.cdc.gov/example", title: "Institutional guidance" },
+        { id: 5, url: "https://blog.company.com/launch", title: "Company announcement" }
+    ]);
+    assert.equal(result.diversity.socialMediaSourcesCount, 2);
+    assert.equal(result.diversity.academicResearchSourcesCount, 1);
+    assert.equal(result.diversity.institutionalSourcesCount, 1);
+    assert.equal(result.diversity.commercialSourcesCount, 1);
+    assert.equal(result.sources[0].quality.category, "social_media_user_generated");
+});
+
+console.log(`[PASS] ${name}`);
         passed++;
     } catch (err) {
         console.error(`[FAIL] ${name}`);
