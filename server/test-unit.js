@@ -8,6 +8,7 @@ import {
     normalizeVerificationItem,
     isExcerptInSource
 } from "./src/agents/claim-verifier.agent.js";
+import { buildVerificationQualification } from "./src/services/research.service.js";
 
 console.log("=========================================");
 console.log(" Running VeriMind AI Backend Unit Tests ");
@@ -268,6 +269,33 @@ test("social platforms are classified separately and excluded from primary-sourc
     assert.equal(result.diversity.institutionalSourcesCount, 1);
     assert.equal(result.diversity.commercialSourcesCount, 1);
     assert.equal(result.sources[0].quality.category, "social_media_user_generated");
+});
+
+
+test("final narrative qualification reflects unresolved claim verification", () => {
+    const note = buildVerificationQualification({
+        summary: { supported: 3, partiallySupported: 0, contradicted: 0, insufficientEvidence: 7, technicalFailures: 0 },
+        verifications: []
+    });
+    assert.match(note, /3 of 10 valid claims as supported/);
+    assert.match(note, /does not establish a definitive answer/);
+});
+
+test("technical verification failures are disclosed as non-factual outcomes", () => {
+    const note = buildVerificationQualification({
+        summary: { supported: 2, partiallySupported: 0, contradicted: 0, insufficientEvidence: 1, technicalFailures: 2 },
+        verifications: []
+    });
+    assert.match(note, /technical verification failures/);
+    assert.match(note, /not factual judgments/);
+});
+
+test("even fully supported claim audits are not described as factual certainty", () => {
+    const note = buildVerificationQualification({
+        summary: { supported: 4, partiallySupported: 0, contradicted: 0, insufficientEvidence: 0, technicalFailures: 0 },
+        verifications: []
+    });
+    assert.match(note, /not factual certainty/);
 });
 
 console.log(`\nResults: ${passed} of ${total} tests passed.`);
