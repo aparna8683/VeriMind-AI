@@ -12,7 +12,7 @@ import {
     Layers
 } from "lucide-react";
 
-export function EvidenceOverview({ trustAssessment, sourcesCount = 0 }) {
+export function EvidenceOverview({ trustAssessment, sourcesCount = 0, sourceFreshness = null }) {
     if (!trustAssessment) return null;
 
     const {
@@ -137,6 +137,14 @@ export function EvidenceOverview({ trustAssessment, sourcesCount = 0 }) {
                     <div className="stat-subtext">
                         {sourceDiversity?.primaryResearchSourcesCount ?? sourceDiversity?.primarySourcesCount ?? 0} likely primary research · {sourceDiversity?.institutionalSourcesCount ?? 0} institutional · {sourceDiversity?.commercialSourcesCount ?? 0} commercial
                     </div>
+                    {sourceFreshness && (
+                        <div className="stat-subtext">
+                            Publication dates available for {sourceFreshness.datedSources} of {sourceFreshness.totalSources} sources
+                            {sourceFreshness.newestPublishedDate
+                                ? ` · Latest dated source: ${new Date(sourceFreshness.newestPublishedDate).toLocaleDateString()}`
+                                : " · Freshness could not be established"}
+                        </div>
+                    )}
                 </div>
             </div>
 
