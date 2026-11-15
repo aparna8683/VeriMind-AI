@@ -134,7 +134,7 @@ router.post("/reverify-claim", async (req, res) => {
             Array.isArray(sources) ? sources : [],
             {
                 verifications: Array.isArray(verifications) ? verifications : [],
-                claims: Array.isArray(claims) ? claims : []
+                claims: Array.isArray(claims) && claims.length > 0 ? claims : null
             }
         );
 
