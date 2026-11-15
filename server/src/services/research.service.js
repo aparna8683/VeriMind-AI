@@ -46,7 +46,10 @@ export function buildVerificationQualification(verificationResult) {
     const validCount = supported + partial + contradicted + insufficient;
 
     if (validCount === 0) {
-        return "\n\n## Claim Verification Qualification\nNo valid claim-level factual determinations were available. The narrative synthesis above is not independently verified by the claim audit.";
+        const failureNote = technical > 0
+            ? " " + technical + " technical verification failure(s) occurred; these are not factual judgments."
+            : "";
+        return "\n\n## Claim Verification Qualification\nNo valid claim-level factual determinations were available." + failureNote + " The narrative synthesis above is not independently verified by the claim audit.";
     }
 
     const lines = [
