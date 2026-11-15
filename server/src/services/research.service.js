@@ -135,7 +135,7 @@ EDITORIAL GUIDELINES:
         ? await verifyClaims(extractedClaims, sources)
         : {
             totalClaims: 0,
-            summary: { supported: 0, partiallySupported: 0, contradicted: 0, insufficientEvidence: 0 },
+            summary: { supported: 0, partiallySupported: 0, contradicted: 0, insufficientEvidence: 0, technicalFailures: 0 },
             verifications: []
         };
 
@@ -300,7 +300,7 @@ export async function reverifySpecificClaim(claimId, claimText, existingSources 
     }
 
     const focusedQuery = claimText.length > 90
-        ? claimText.slice(0, 90).replace(/[^\\w\\s]/g, "")
+        ? claimText.slice(0, 90).replace(/[^A-Za-z0-9 ]/g, "")
         : claimText;
     const searchResult = await searchWeb(focusedQuery, { maxResults: 3 });
 
