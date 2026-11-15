@@ -367,7 +367,8 @@ export async function reverifySpecificClaim(claimId, claimText, existingSources 
         verificationSummary: summarizeVerifications(mergedVerifications),
         trustAssessment,
         newSourcesAdded: newSources.length,
-        allSources: finalQualityResult.sources
+        allSources: finalQualityResult.sources,
+        sourceFreshness: buildSourceFreshness(finalQualityResult.sources)
     };
 }
 
