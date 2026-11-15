@@ -207,20 +207,6 @@ test("compound claim status is derived from validated assertion-level outcomes",
         {
             status: "supported",
             evidence: [],
-test("social platforms are classified separately and excluded from primary-source counts", () => {
-    const result = assessSources([
-        { id: 1, url: "https://www.linkedin.com/posts/example", title: "LinkedIn post" },
-        { id: 2, url: "https://www.facebook.com/example", title: "Facebook post" },
-        { id: 3, url: "https://www.nature.com/articles/example", title: "Research article" },
-        { id: 4, url: "https://www.cdc.gov/example", title: "Institutional guidance" },
-        { id: 5, url: "https://blog.company.com/launch", title: "Company announcement" }
-    ]);
-    assert.equal(result.diversity.socialMediaSourcesCount, 2);
-    assert.equal(result.diversity.academicResearchSourcesCount, 1);
-    assert.equal(result.diversity.institutionalSourcesCount, 1);
-    assert.equal(result.diversity.commercialSourcesCount, 1);
-    assert.equal(result.sources[0].quality.category, "social_media_user_generated");
-});
 
             assertionResults: [
                 {
@@ -267,6 +253,21 @@ test("trust metrics exclude technical and malformed records and cap the rating",
     assert.equal(assessment.metrics.invalidRecords, 1);
     assert.equal(assessment.metrics.supportRate, 100);
     assert.equal(assessment.assessment, "limited");
+});
+
+test("social platforms are classified separately and excluded from primary-source counts", () => {
+    const result = assessSources([
+        { id: 1, url: "https://www.linkedin.com/posts/example", title: "LinkedIn post" },
+        { id: 2, url: "https://www.facebook.com/example", title: "Facebook post" },
+        { id: 3, url: "https://www.nature.com/articles/example", title: "Research article" },
+        { id: 4, url: "https://www.cdc.gov/example", title: "Institutional guidance" },
+        { id: 5, url: "https://blog.company.com/launch", title: "Company announcement" }
+    ]);
+    assert.equal(result.diversity.socialMediaSourcesCount, 2);
+    assert.equal(result.diversity.academicResearchSourcesCount, 1);
+    assert.equal(result.diversity.institutionalSourcesCount, 1);
+    assert.equal(result.diversity.commercialSourcesCount, 1);
+    assert.equal(result.sources[0].quality.category, "social_media_user_generated");
 });
 
 console.log(`\nResults: ${passed} of ${total} tests passed.`);
