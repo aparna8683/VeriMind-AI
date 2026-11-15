@@ -35,6 +35,40 @@ function buildSourceFreshness(sources) {
     };
 }
 
+export function buildVerificationQualification(verificationResult) {
+    const verifications = Array.isArray(verificationResult?.verifications) ? verificationResult.verifications : [];
+    const summary = verificationResult?.summary || summarizeVerifications(verifications);
+    const supported = summary.supported || 0;
+    const partial = summary.partiallySupported || 0;
+    const contradicted = summary.contradicted || 0;
+    const insufficient = summary.insufficientEvidence || 0;
+    const technical = summary.technicalFailures || 0;
+    const validCount = supported + partial + contradicted + insufficient;
+
+    if (validCount === 0) {
+        return "\n\n## Claim Verification Qualification\nNo valid claim-level factual determinations were available. The narrative synthesis above is not independently verified by the claim audit.";
+    }
+
+    const lines = [
+        "The claim audit classified " + supported + " of " + validCount + " valid claims as supported, " +
+        partial + " as partially supported, " + contradicted + " as contradicted, and " +
+        insufficient + " as insufficiently supported by the retrieved excerpts."
+    ];
+
+    if (technical > 0) {
+        lines.push(technical + " additional claim(s) encountered technical verification failures. These are not factual judgments and are excluded from the factual percentages.");
+        lines.push("Because the verification process was incomplete, the narrative conclusion should be treated as provisional.");
+    } else if (contradicted > 0) {
+        lines.push("Conflicting evidence was identified. The narrative conclusion should be treated as contested rather than definitive.");
+    } else if (insufficient + partial > supported) {
+        lines.push("More claims were partially supported or unresolved than fully supported. The retrieved evidence does not establish a definitive answer to the research question; treat the narrative conclusion as provisional.");
+    } else {
+        lines.push("This measures alignment with the retrieved excerpts, not factual certainty. Review the linked source context before treating the narrative conclusion as established.");
+    }
+
+    return "\n\n## Claim Verification Qualification\n" + lines.join(" ");
+}
+
 /**
  * Executes the complete evidence-aware research and verification pipeline.
  * Adheres strictly to free-tier budget limits, caching, and multi-step verification.
@@ -119,6 +153,9 @@ EDITORIAL GUIDELINES:
 6. Do not fabricate citations or facts not present in the retrieved evidence.
 7. In Research Limitations, describe publication-date coverage only from explicit PUBLISHED DATE metadata above. Do not invent a latest evidence year or infer a page publication date from dates mentioned inside its text.
 8. If publication dates are unavailable for some or all sources, explicitly say freshness cannot be fully established.
+9. Separate directly supported facts from forecasts, plans, interpretations, and inference.
+10. Do not treat a company's announced target, pilot, or demonstration as proof of achieved mass-market commercialization.
+11. If the retrieved sources do not establish a clear answer, say so in the Bottom Line instead of forcing a confident conclusion.
 `;
 
     const answer = await generateWithGroq(answerPrompt);
@@ -269,7 +306,7 @@ EDITORIAL GUIDELINES:
     const fullResult = {
         query: trimmedQuery,
         timestamp: new Date().toISOString(),
-        answer,
+        answer: answer + buildVerificationQualification(verificationResult),
         sources: finalQualityResult.sources,
         claims: claimResult,
         verification: verificationResult,
