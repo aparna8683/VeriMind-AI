@@ -124,6 +124,13 @@ export function normalizeVerificationItem(claim, item, sources = []) {
     if (claim.isCompound && (!Array.isArray(item.assertionResults) || item.assertionResults.length !== claim.subAssertions.length)) {
         return buildVerificationFailure(claim, "ASSERTION_RESULTS_MISSING", "The verifier did not return one assertion-level result for every extracted sub-assertion.");
     }
+    if (claim.isCompound) {
+        const expected = new Set(claim.subAssertions.map((assertion) => normalizeText(assertion)));
+        const returned = item.assertionResults.map((assertion) => normalizeText(assertion?.assertion ?? assertion?.text));
+        if (new Set(returned).size !== expected.size || returned.some((assertion) => !expected.has(assertion))) {
+            return buildVerificationFailure(claim, "ASSERTION_IDENTITY_MISMATCH", "The verifier did not return each extracted sub-assertion exactly once.");
+        }
+    }
 
     if (Array.isArray(item.assertionResults)) {
         for (const assertion of item.assertionResults) {
