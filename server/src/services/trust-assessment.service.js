@@ -5,21 +5,59 @@ import CONFIG from "../config/constants.js";
  * Adheres strictly to the principle that evidence alignment is NOT factual certainty.
  */
 export function buildTrustAssessment(verification, sourceDiversity = null) {
-    const results = verification?.verifications || [];
-    const totalClaims = results.length;
+    const records = Array.isArray(verification?.verifications) ? verification.verifications : [];
+    const validStatuses = [
+        CONFIG.STATUSES.SUPPORTED,
+        CONFIG.STATUSES.PARTIALLY_SUPPORTED,
+        CONFIG.STATUSES.CONTRADICTED,
+        CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
+    ];
+    const seenIds = new Set();
+    const results = [];
+    let technicalFailures = 0;
+    let invalidRecords = 0;
 
+    for (const item of records) {
+        if (!item || item.status === CONFIG.STATUSES.VERIFICATION_ERROR) {
+            technicalFailures++;
+            continue;
+        }
+        if (!validStatuses.includes(item.status)) {
+            technicalFailures++;
+            invalidRecords++;
+            continue;
+        }
+        if (typeof item.claimId !== "string" || !item.claimId.trim() ||
+            typeof item.claim !== "string" || !item.claim.trim() ||
+            seenIds.has(item.claimId)) {
+            technicalFailures++;
+            invalidRecords++;
+            continue;
+        }
+        seenIds.add(item.claimId);
+        results.push(item);
+    }
+
+    const totalClaims = results.length;
     if (totalClaims === 0) {
+        const warnings = ["No valid claim-level factual determinations were available for trust assessment."];
+        if (technicalFailures > 0) {
+            warnings.push(technicalFailures + " technical or invalid verification record(s) were excluded from factual metrics.");
+        }
         return {
             assessed: false,
             assessment: "unassessed",
-            assessmentLabel: "No Claims Assessed",
-            message: "No verifiable factual claims were extracted from the answer.",
+            assessmentLabel: "Insufficient Valid Verification Data",
+            message: "The system could not calculate a factual evidence-alignment rating because no valid claim determinations were available.",
             metrics: {
                 totalClaims: 0,
+                totalRecords: records.length,
                 supported: 0,
                 partiallySupported: 0,
                 contradicted: 0,
                 insufficientEvidence: 0,
+                technicalFailures,
+                invalidRecords,
                 traceableClaims: 0,
                 supportRate: 0,
                 partialSupportRate: 0,
@@ -27,7 +65,7 @@ export function buildTrustAssessment(verification, sourceDiversity = null) {
                 unresolvedRate: 0,
                 traceabilityRate: 0
             },
-            warnings: ["No checkable factual claims could be identified in the generated response."],
+            warnings,
             methodology: getMethodologyDescription(),
             disclaimer: getDisclaimer()
         };
@@ -37,11 +75,9 @@ export function buildTrustAssessment(verification, sourceDiversity = null) {
     const partiallySupported = results.filter((item) => item.status === CONFIG.STATUSES.PARTIALLY_SUPPORTED).length;
     const contradicted = results.filter((item) => item.status === CONFIG.STATUSES.CONTRADICTED).length;
     const insufficientEvidence = results.filter((item) => item.status === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE).length;
-
-    const traceableClaims = results.filter(
-        (item) => Array.isArray(item.evidence) && item.evidence.length > 0
+    const traceableClaims = results.filter((item) =>
+        Array.isArray(item.evidence) && item.evidence.length > 0
     ).length;
-
     const calcPercentage = (count) => Number(((count / totalClaims) * 100).toFixed(1));
 
     const supportRate = calcPercentage(supported);
@@ -50,16 +86,16 @@ export function buildTrustAssessment(verification, sourceDiversity = null) {
     const unresolvedRate = calcPercentage(insufficientEvidence);
     const traceabilityRate = calcPercentage(traceableClaims);
 
-    // Multi-factor classification
     let assessment;
     let assessmentLabel;
-
     if (contradicted > 0) {
         assessment = "contradicted";
         assessmentLabel = "Direct Contradictions Identified";
+    } else if (technicalFailures > 0) {
+        assessment = "limited";
+        assessmentLabel = "Limited Evidence / Verification Failures";
     } else if (
         supportRate >= 80 &&
-        contradictionRate === 0 &&
         unresolvedRate <= 15 &&
         traceabilityRate >= 80
     ) {
@@ -67,7 +103,6 @@ export function buildTrustAssessment(verification, sourceDiversity = null) {
         assessmentLabel = "Strong Evidence Alignment";
     } else if (
         supportRate + partialSupportRate >= 60 &&
-        contradictionRate === 0 &&
         unresolvedRate <= 35
     ) {
         assessment = "moderate";
@@ -78,31 +113,15 @@ export function buildTrustAssessment(verification, sourceDiversity = null) {
     }
 
     const warnings = [];
-
-    if (contradicted > 0) {
-        warnings.push(`${contradicted} claim(s) directly conflict with the retrieved web evidence.`);
-    }
-
-    if (insufficientEvidence > 0) {
-        warnings.push(`${insufficientEvidence} claim(s) lack verifiable direct excerpt support in the retrieved sources.`);
-    }
-
-    if (partiallySupported > 0) {
-        warnings.push(`${partiallySupported} claim(s) are partially supported, but certain sub-assertions remain uncorroborated.`);
-    }
-
-    if (traceabilityRate < 100) {
-        warnings.push(`${totalClaims - traceableClaims} claim(s) do not have verbatim excerpt quotes mapped to sources.`);
-    }
-
-    const compoundClaimsCount = results.filter((r) => r.isCompound).length;
-    if (compoundClaimsCount > 0) {
-        warnings.push(`${compoundClaimsCount} compound claim(s) combine multiple assertions and warrant separate scrutiny.`);
-    }
-
-    if (warnings.length === 0) {
-        warnings.push("All identified claims match validated excerpts in retrieved evidence with zero detected contradictions.");
-    }
+    if (contradicted > 0) warnings.push(contradicted + " claim(s) directly conflict with the retrieved web evidence.");
+    if (insufficientEvidence > 0) warnings.push(insufficientEvidence + " claim(s) lack sufficient direct excerpt support in the retrieved sources.");
+    if (partiallySupported > 0) warnings.push(partiallySupported + " claim(s) have only partial evidence support.");
+    if (traceabilityRate < 100) warnings.push((totalClaims - traceableClaims) + " valid claim(s) do not have validated excerpts mapped to sources.");
+    const compoundClaimsCount = results.filter((item) => item.isCompound).length;
+    if (compoundClaimsCount > 0) warnings.push(compoundClaimsCount + " compound claim(s) contain multiple assertions and warrant separate scrutiny.");
+    if (technicalFailures > 0) warnings.push(technicalFailures + " technical or invalid verification record(s) were excluded from factual percentages; the overall assessment was capped at limited.");
+    if (invalidRecords > 0) warnings.push(invalidRecords + " malformed or duplicate record(s) were excluded from the assessment.");
+    if (warnings.length === 0) warnings.push("All assessed claims have validated excerpt links and no contradictions were detected.");
 
     return {
         assessed: true,
@@ -110,10 +129,13 @@ export function buildTrustAssessment(verification, sourceDiversity = null) {
         assessmentLabel,
         metrics: {
             totalClaims,
+            totalRecords: records.length,
             supported,
             partiallySupported,
             contradicted,
             insufficientEvidence,
+            technicalFailures,
+            invalidRecords,
             traceableClaims,
             supportRate,
             partialSupportRate,
@@ -130,11 +152,11 @@ export function buildTrustAssessment(verification, sourceDiversity = null) {
 
 function getMethodologyDescription() {
     return {
-        supportRate: "Percentage of claims directly corroborated by verbatim excerpts in retrieved sources.",
+        supportRate: "Percentage of valid claim determinations classified as supported. Technical failures and malformed records are excluded and reported separately.",
         partialSupportRate: "Percentage of claims with partial evidence corroboration.",
         contradictionRate: "Percentage of claims directly refuted by retrieved evidence.",
         unresolvedRate: "Percentage of claims where retrieved sources provide insufficient evidence.",
-        traceabilityRate: "Percentage of claims with at least one validated excerpt quote linked to a source URL."
+        traceabilityRate: "Percentage of valid claim determinations with at least one validated excerpt quote linked to a source URL. Technical failures are excluded from this denominator and reported separately."
     };
 }
 
