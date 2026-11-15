@@ -8,6 +8,33 @@ import { cacheService } from "./cache.service.js";
 import { budgetService } from "./budget.service.js";
 import CONFIG from "../config/constants.js";
 
+function summarizeVerifications(verifications) {
+    return {
+        supported: verifications.filter((item) => item.status === CONFIG.STATUSES.SUPPORTED).length,
+        partiallySupported: verifications.filter((item) => item.status === CONFIG.STATUSES.PARTIALLY_SUPPORTED).length,
+        contradicted: verifications.filter((item) => item.status === CONFIG.STATUSES.CONTRADICTED).length,
+        insufficientEvidence: verifications.filter((item) => item.status === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE).length,
+        technicalFailures: verifications.filter((item) => item.status === CONFIG.STATUSES.VERIFICATION_ERROR).length
+    };
+}
+
+function buildSourceFreshness(sources) {
+    const dated = sources
+        .map((source) => ({ source, date: source.publishedDate ? new Date(source.publishedDate) : null }))
+        .filter((entry) => entry.date && !Number.isNaN(entry.date.getTime()));
+    const timestamps = dated.map((entry) => entry.date.getTime()).sort((a, b) => a - b);
+    return {
+        totalSources: sources.length,
+        datedSources: dated.length,
+        undatedSources: sources.length - dated.length,
+        oldestPublishedDate: timestamps.length ? new Date(timestamps[0]).toISOString() : null,
+        newestPublishedDate: timestamps.length ? new Date(timestamps[timestamps.length - 1]).toISOString() : null,
+        note: dated.length
+            ? "Dates reflect publication metadata supplied by the search provider; undated sources cannot be assigned a publication date."
+            : "The search provider supplied no usable publication dates. Source freshness could not be established."
+    };
+}
+
 /**
  * Executes the complete evidence-aware research and verification pipeline.
  * Adheres strictly to free-tier budget limits, caching, and multi-step verification.
@@ -62,6 +89,7 @@ export async function researchAndAnswer(query, options = {}) {
 SOURCE ID: [${s.id}]
 TITLE: ${s.title}
 URL: ${s.url}
+PUBLISHED DATE: ${s.publishedDate || "Not provided by the search provider"}
 DOMAIN: ${s.quality?.domain || "web"}
 CATEGORY: ${s.quality?.categoryLabel || "General"}
 CONTENT:
@@ -89,6 +117,8 @@ EDITORIAL GUIDELINES:
 4. Every material assertion MUST reference its corresponding source ID.
 5. If sources disagree or evidence is ambiguous, state the discrepancy transparently.
 6. Do not fabricate citations or facts not present in the retrieved evidence.
+7. In Research Limitations, describe publication-date coverage only from explicit PUBLISHED DATE metadata above. Do not invent a latest evidence year or infer a page publication date from dates mentioned inside its text.
+8. If publication dates are unavailable for some or all sources, explicitly say freshness cannot be fully established.
 `;
 
     const answer = await generateWithGroq(answerPrompt);
@@ -164,20 +194,54 @@ EDITORIAL GUIDELINES:
                         );
 
                         if (originalIndex !== -1) {
-                            const statusChanged = updatedVerif.status !== claim.status;
-                            verificationResult.verifications[originalIndex] = {
-                                ...updatedVerif,
-                                reverified: true,
-                                originalStatus: claim.status,
-                                statusChanged,
-                                reverificationQuery: targetedQuery,
-                                newEvidenceCount: formattedNewSources.length
-                            };
-                            console.log(`Claim ${claim.claimId} re-verified: ${claim.status} -> ${updatedVerif.status}`);
+                            const isValidResult =
+                                updatedVerif.claimId === claim.claimId &&
+                                updatedVerif.claim === claim.claim &&
+                                [
+                                    CONFIG.STATUSES.SUPPORTED,
+                                    CONFIG.STATUSES.PARTIALLY_SUPPORTED,
+                                    CONFIG.STATUSES.CONTRADICTED,
+                                    CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
+                                ].includes(updatedVerif.status);
+
+                            if (isValidResult) {
+                                verificationResult.verifications[originalIndex] = {
+                                    ...updatedVerif,
+                                    reverified: true,
+                                    originalStatus: claim.status,
+                                    statusChanged: updatedVerif.status !== claim.status,
+                                    reverificationQuery: targetedQuery,
+                                    newEvidenceCount: formattedNewSources.length,
+                                    reverificationAttempt: { status: "succeeded", timestamp: new Date().toISOString() }
+                                };
+                                console.log(`Claim ${claim.claimId} re-verified: ${claim.status} -> ${updatedVerif.status}`);
+                            } else {
+                                verificationResult.verifications[originalIndex] = {
+                                    ...claim,
+                                    reverificationAttempt: {
+                                        status: "failed",
+                                        code: updatedVerif.verificationError?.code || "INVALID_REVERIFICATION_RESULT",
+                                        message: "The retry did not return a valid factual determination; the previous result was kept.",
+                                        timestamp: new Date().toISOString()
+                                    }
+                                };
+                            }
                         }
                     }
                 }
             } catch (err) {
+                const originalIndex = verificationResult.verifications.findIndex((item) => item.claimId === claim.claimId);
+                if (originalIndex !== -1) {
+                    verificationResult.verifications[originalIndex] = {
+                        ...claim,
+                        reverificationAttempt: {
+                            status: "failed",
+                            code: "TARGETED_RESEARCH_FAILED",
+                            message: "Targeted evidence retrieval failed; the previous verification result was kept.",
+                            timestamp: new Date().toISOString()
+                        }
+                    };
+                }
                 console.warn(`[Targeted Retrieval Warning] Re-search failed for ${claim.claimId}:`, err.message);
             }
         }
@@ -187,7 +251,8 @@ EDITORIAL GUIDELINES:
             supported: verificationResult.verifications.filter((v) => v.status === CONFIG.STATUSES.SUPPORTED).length,
             partiallySupported: verificationResult.verifications.filter((v) => v.status === CONFIG.STATUSES.PARTIALLY_SUPPORTED).length,
             contradicted: verificationResult.verifications.filter((v) => v.status === CONFIG.STATUSES.CONTRADICTED).length,
-            insufficientEvidence: verificationResult.verifications.filter((v) => v.status === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE).length
+            insufficientEvidence: verificationResult.verifications.filter((v) => v.status === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE).length,
+            technicalFailures: verificationResult.verifications.filter((v) => v.status === CONFIG.STATUSES.VERIFICATION_ERROR).length
         };
     }
 
@@ -209,7 +274,8 @@ EDITORIAL GUIDELINES:
         claims: claimResult,
         verification: verificationResult,
         trustAssessment,
-        usage: budget.getReport()
+        usage: budget.getReport(),
+        sourceFreshness: buildSourceFreshness(finalQualityResult.sources)
     };
 
     // Cache the complete result
