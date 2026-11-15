@@ -80,7 +80,7 @@ function validateEvidenceEntries(entries, sourceMap, maxEvidence, allowedSourceI
     const seen = new Set();
     for (const entry of Array.isArray(entries) ? entries : []) {
         if (!entry || typeof entry.excerpt !== "string") continue;
-        const source = sourceMap.get(String(entry.sourceId)) || sourceMap.get(entry.sourceId);
+        const source = sourceMap.get(String(entry.sourceId));
         if (!source || (allowedSourceIds && !allowedSourceIds.has(source.id)) || !isExcerptInSource(entry.excerpt, source.content)) continue;
         const key = String(entry.sourceId) + ":" + normalizeText(entry.excerpt);
         if (seen.has(key)) continue;
@@ -134,7 +134,7 @@ export function normalizeVerificationItem(claim, item, sources = [], allowedSour
 
     const sourceMap = new Map((Array.isArray(sources) ? sources : [])
         .filter((source) => source && source.id != null)
-        .map((source) => [source.id, source]));
+        .map((source) => [String(source.id), source]));
     const maxEvidence = CONFIG.MAX_EVIDENCE_SOURCES_PER_CLAIM || 3;
     const validatedEvidence = validateEvidenceEntries(item.evidence, sourceMap, maxEvidence, allowedSourceIds);
     const assertionResults = [];
@@ -340,6 +340,8 @@ RULES:
 - Return sourceId values only from the claim allowedSourceIds.
 - Positive support and contradiction require a directly relevant verbatim excerpt.
 - Do not infer source-wide absence from this retrieved excerpt set.
+- If the source itself explicitly states that information is absent, quote that exact passage and set evidenceState to "source_explicitly_states_absence".
+- If the supplied excerpt set does not contain the information, set evidenceState to "not_found_in_retrieved_excerpts".
 - If there are no relevant sources or no direct quotation, use insufficient_evidence.
 - Keep rationale concise (one or two sentences).
 - For every compound claim, return one assertionResults item for each supplied subAssertion, preserving its exact text.
@@ -360,7 +362,8 @@ Return ONLY this JSON object:
         {
           "assertion": "Exact sub-assertion text.",
           "status": "supported",
-          "evidence": [{"sourceId": 1, "excerpt": "Exact source quotation."}]
+          "evidence": [{"sourceId": 1, "excerpt": "Exact source quotation."}],
+          "evidenceState": "explicitly_stated"
         }
       ],
       "reviewNeeded": false,
