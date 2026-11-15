@@ -135,7 +135,7 @@ export function EvidenceOverview({ trustAssessment, sourcesCount = 0, sourceFres
                         <span className="stat-secondary"> sources / {sourceDiversity?.uniqueDomainsCount ?? 0} domains</span>
                     </div>
                     <div className="stat-subtext">
-                        {sourceDiversity?.primaryResearchSourcesCount ?? sourceDiversity?.primarySourcesCount ?? 0} likely primary research · {sourceDiversity?.institutionalSourcesCount ?? 0} institutional · {sourceDiversity?.commercialSourcesCount ?? 0} commercial
+                        {sourceDiversity?.academicResearchSourcesCount ?? 0} academic/research · {sourceDiversity?.institutionalSourcesCount ?? 0} institutional · {sourceDiversity?.commercialSourcesCount ?? 0} commercial · {sourceDiversity?.socialMediaSourcesCount ?? 0} social media
                     </div>
                     {sourceFreshness && (
                         <div className="stat-subtext">
