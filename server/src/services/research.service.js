@@ -303,7 +303,8 @@ EDITORIAL GUIDELINES:
     console.log("Step 7: Building trust assessment...");
     const trustAssessment = buildTrustAssessment(
         verificationResult,
-        finalQualityResult.diversity
+        finalQualityResult.diversity,
+        extractedClaims
     );
 
     const fullResult = {
@@ -367,11 +368,16 @@ export async function reverifySpecificClaim(claimId, claimText, existingSources 
         CONFIG.STATUSES.CONTRADICTED,
         CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
     ];
+    const expectedClaims = Array.isArray(reportContext.claims) ? reportContext.claims : null;
+    const claimMatchesReport = !expectedClaims || expectedClaims.some((claim) =>
+        claim?.id === claimId && claim?.text === claimText
+    );
     const succeeded = Boolean(
         verification &&
         verification.claimId === claimId &&
         verification.claim === claimText &&
-        validStatuses.includes(verification.status)
+        validStatuses.includes(verification.status) &&
+        claimMatchesReport
     );
 
     const previousVerifications = Array.isArray(reportContext.verifications)
@@ -390,7 +396,8 @@ export async function reverifySpecificClaim(claimId, claimText, existingSources 
     const finalQualityResult = assessSources(allSources);
     const trustAssessment = buildTrustAssessment(
         { verifications: mergedVerifications },
-        finalQualityResult.diversity
+        finalQualityResult.diversity,
+        expectedClaims
     );
 
     return {
@@ -399,8 +406,8 @@ export async function reverifySpecificClaim(claimId, claimText, existingSources 
             ? { status: "succeeded" }
             : {
                 status: "failed",
-                code: verification?.verificationError?.code || "INVALID_REVERIFICATION_RESULT",
-                message: "No valid claim-level determination was returned; the previous verification result must be kept."
+                code: !claimMatchesReport ? "CLAIM_ID_MISMATCH" : verification?.verificationError?.code || "INVALID_REVERIFICATION_RESULT",
+                message: !claimMatchesReport ? "This claim does not match the report extracted claims; the previous result was kept." : "No valid claim-level determination was returned; the previous verification result must be kept."
             },
         claimId,
         verification,
