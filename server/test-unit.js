@@ -6,7 +6,8 @@ import { assessSourceQuality, assessSources } from "./src/services/source-qualit
 import { buildTrustAssessment } from "./src/services/trust-assessment.service.js";
 import {
     normalizeVerificationItem,
-    isExcerptInSource
+    isExcerptInSource,
+    selectSourcesForClaim
 } from "./src/agents/claim-verifier.agent.js";
 import { buildVerificationQualification } from "./src/services/research.service.js";
 
@@ -271,6 +272,66 @@ test("social platforms are classified separately and excluded from primary-sourc
     assert.equal(result.sources[0].quality.category, "social_media_user_generated");
 });
 
+
+
+test("claim source selection uses lexical relevance and bounded provider-score fallback", () => {
+    const sources = [
+        { id: 1, title: "Quantum mechanics overview", content: "Quantum systems and wave functions." },
+        { id: 2, title: "Ocean currents", content: "Measurements of ocean currents.", score: 0.9 },
+        { id: 3, title: "Bird migration", content: "Seasonal migration patterns.", score: 0.2 }
+    ];
+    assert.deepStrictEqual(
+        selectSourcesForClaim({ text: "Quantum mechanics" }, sources, 1).map((source) => source.id),
+        [1]
+    );
+    assert.deepStrictEqual(
+        selectSourcesForClaim({ text: "Unrelated topic" }, sources.slice(1), 1).map((source) => source.id),
+        [2]
+    );
+    assert.deepStrictEqual(
+        selectSourcesForClaim({ text: "Unrelated topic" }, sources.slice(1).map(({ score, ...source }) => source), 1),
+        []
+    );
+});
+
+test("verification evidence cannot come from a source outside the claim's allowed source IDs", () => {
+    const sourceA = "A validated quotation from the relevant source.";
+    const result = normalizeVerificationItem(
+        { id: "C5", text: "A claim supported by the selected source." },
+        { status: "supported", evidence: [{ sourceId: 2, excerpt: "A validated quotation from the other source." }] },
+        [
+            { id: 1, title: "Allowed", url: "https://example.com/allowed", content: sourceA },
+            { id: 2, title: "Not allowed", url: "https://example.com/other", content: "A validated quotation from the other source." }
+        ],
+        new Set([1])
+    );
+    assert.strictEqual(result.status, CONFIG.STATUSES.INSUFFICIENT_EVIDENCE);
+    assert.strictEqual(result.evidence.length, 0);
+});
+
+test("absence claims require a source that explicitly states the absence", () => {
+    const sourceText = "The article describes the intervention and its measured outcomes.";
+    const result = normalizeVerificationItem(
+        {
+            id: "C6",
+            text: "The article does not provide direct comparative data.",
+            isCompound: true,
+            subAssertions: ["The article does not provide direct comparative data."]
+        },
+        {
+            status: "supported",
+            assertionResults: [{
+                assertion: "The article does not provide direct comparative data.",
+                status: "supported",
+                evidence: [{ sourceId: 1, excerpt: sourceText }],
+                evidenceState: "explicitly_stated"
+            }]
+        },
+        [{ id: 1, title: "Article", url: "https://example.com/article", content: sourceText }]
+    );
+    assert.strictEqual(result.status, CONFIG.STATUSES.INSUFFICIENT_EVIDENCE);
+    assert.strictEqual(result.assertionResults[0].evidenceState, "not_found_in_retrieved_excerpts");
+});
 
 test("final narrative qualification reflects unresolved claim verification", () => {
     const note = buildVerificationQualification({
