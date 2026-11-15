@@ -289,7 +289,7 @@ EDITORIAL GUIDELINES:
  * Manually re-verifies a specific claim on-demand with a targeted search.
  * Respects research budget and appends newly retrieved sources.
  */
-export async function reverifySpecificClaim(claimId, claimText, existingSources = []) {
+export async function reverifySpecificClaim(claimId, claimText, existingSources = [], reportContext = {}) {
     if (!claimId || !claimText) {
         throw new Error("claimId and claimText are required for manual re-verification");
     }
@@ -300,34 +300,74 @@ export async function reverifySpecificClaim(claimId, claimText, existingSources 
     }
 
     const focusedQuery = claimText.length > 90
-        ? claimText.slice(0, 90).replace(/[^\w\s]/g, "")
+        ? claimText.slice(0, 90).replace(/[^\\w\\s]/g, "")
         : claimText;
-
     const searchResult = await searchWeb(focusedQuery, { maxResults: 3 });
 
-    // Deduplicate against existing sources
-    const existingUrls = new Set(existingSources.map((s) => s.url));
-    const newSources = (searchResult.sources || []).filter((s) => !existingUrls.has(s.url));
-
+    const existingUrls = new Set(existingSources.map((source) => source.url));
+    const newSources = (searchResult.sources || []).filter((source) => !existingUrls.has(source.url));
     let allSources = [...existingSources];
+
     if (newSources.length > 0) {
         const startId = allSources.length + 1;
-        const formattedNew = newSources.map((s, i) => ({
-            ...s,
-            id: startId + i
+        const formattedNew = newSources.map((source, index) => ({
+            ...source,
+            id: startId + index
         }));
-        const assessed = assessSources(formattedNew);
-        allSources.push(...assessed.sources);
+        const assessedNew = assessSources(formattedNew);
+        allSources.push(...assessedNew.sources);
     }
 
     const singleClaim = [{ id: claimId, text: claimText }];
     const reverifyResult = await verifyClaims(singleClaim, allSources);
+    const verification = reverifyResult.verifications[0] || null;
+    const validStatuses = [
+        CONFIG.STATUSES.SUPPORTED,
+        CONFIG.STATUSES.PARTIALLY_SUPPORTED,
+        CONFIG.STATUSES.CONTRADICTED,
+        CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
+    ];
+    const succeeded = Boolean(
+        verification &&
+        verification.claimId === claimId &&
+        verification.claim === claimText &&
+        validStatuses.includes(verification.status)
+    );
+
+    const previousVerifications = Array.isArray(reportContext.verifications)
+        ? reportContext.verifications
+        : [];
+    const mergedVerifications = previousVerifications.some((item) => item.claimId === claimId)
+        ? previousVerifications.map((item) => item.claimId === claimId && succeeded ? {
+            ...verification,
+            reverified: true,
+            originalStatus: item.status,
+            statusChanged: item.status !== verification.status,
+            reverificationAttempt: { status: "succeeded", timestamp: new Date().toISOString() }
+        } : item)
+        : verification ? [verification] : [];
+
+    const finalQualityResult = assessSources(allSources);
+    const trustAssessment = buildTrustAssessment(
+        { verifications: mergedVerifications },
+        finalQualityResult.diversity
+    );
 
     return {
+        success: succeeded,
+        attempt: succeeded
+            ? { status: "succeeded" }
+            : {
+                status: "failed",
+                code: verification?.verificationError?.code || "INVALID_REVERIFICATION_RESULT",
+                message: "No valid claim-level determination was returned; the previous verification result must be kept."
+            },
         claimId,
-        verification: reverifyResult.verifications[0] || null,
+        verification,
+        verificationSummary: summarizeVerifications(mergedVerifications),
+        trustAssessment,
         newSourcesAdded: newSources.length,
-        allSources
+        allSources: finalQualityResult.sources
     };
 }
 
