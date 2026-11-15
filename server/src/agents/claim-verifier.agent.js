@@ -27,24 +27,79 @@ function normalizeText(text) {
  * Allows slight punctuation or whitespace differences.
  */
 function isExcerptInSource(excerpt, sourceContent) {
-    if (!excerpt || !sourceContent) return false;
+    if (typeof excerpt !== "string" || typeof sourceContent !== "string") return false;
     const normExcerpt = normalizeText(excerpt);
     const normSource = normalizeText(sourceContent);
+    // Do not accept matching fragments from opposite ends of a quotation:
+    // the complete normalized excerpt must occur in the source.
+    return normExcerpt.length >= 10 && normSource.includes(normExcerpt);
+}
 
-    if (normExcerpt.length < 10) return false; // reject trivial fragments
+function buildVerificationFailure(claim, code, message) {
+    return {
+        claimId: claim.id,
+        claim: claim.text,
+        status: CONFIG.STATUSES.VERIFICATION_ERROR,
+        rationale: "The verification process did not produce a valid structured determination. This is a technical failure, not evidence that the claim is true or false.",
+        evidence: [],
+        assertionResults: [],
+        isCompound: Boolean(claim.isCompound),
+        subAssertions: claim.subAssertions || [],
+        reviewNeeded: true,
+        reviewReason: "Verification failed before a reliable factual determination could be made.",
+        availableEvidenceSummary: "No validated assertion-level determination is available.",
+        missingEvidence: null,
+        recommendedAction: "Retry verification or inspect the retrieved sources manually.",
+        verificationError: { code, message }
+    };
+}
 
-    if (normSource.includes(normExcerpt)) return true;
-
-    // Fallback: check if the first 40 characters and last 40 characters match
-    if (normExcerpt.length > 80) {
-        const startChunk = normExcerpt.slice(0, 45);
-        const endChunk = normExcerpt.slice(-45);
-        if (normSource.includes(startChunk) && normSource.includes(endChunk)) {
-            return true;
-        }
+function validateEvidenceEntries(entries, sourceMap, maxEvidence) {
+    const validated = [];
+    const seen = new Set();
+    for (const entry of Array.isArray(entries) ? entries : []) {
+        if (!entry || typeof entry.excerpt !== "string") continue;
+        const source = sourceMap.get(String(entry.sourceId));
+        if (!source || !isExcerptInSource(entry.excerpt, source.content)) continue;
+        const key = String(entry.sourceId) + ":" + normalizeText(entry.excerpt);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        validated.push({
+            sourceId: source.id,
+            sourceTitle: source.title,
+            url: source.url,
+            excerpt: entry.excerpt.trim()
+        });
+        if (validated.length >= maxEvidence) break;
     }
+    return validated;
+}
 
-    return false;
+function buildFinalRationale(status, evidenceCount) {
+    const countText = evidenceCount === 1
+        ? "One excerpt passed verbatim source-text validation."
+        : evidenceCount + " excerpts passed verbatim source-text validation.";
+    if (status === CONFIG.STATUSES.SUPPORTED) {
+        return "The verifier classified this claim as supported. " + countText + " Exact-text matching confirms that the quotation occurs in the retrieved source; it does not independently prove that it entails every part of the claim.";
+    }
+    if (status === CONFIG.STATUSES.PARTIALLY_SUPPORTED) {
+        return "The verifier classified this claim as partially supported. " + countText + " At least one material element remains unestablished by the supplied evidence.";
+    }
+    if (status === CONFIG.STATUSES.CONTRADICTED) {
+        return "The verifier classified this claim as contradicted. " + countText + " Review the quoted source context before relying on this determination.";
+    }
+    return evidenceCount > 0
+        ? "The retrieved excerpts were text-validated, but the verifier did not find them sufficient to establish or refute this claim. " + countText
+        : "No model-provided excerpt passed verbatim validation against the retrieved source text. No factual determination can be made from the validated excerpts.";
+}
+
+function deriveAssertionStatus(assertions) {
+    const statuses = assertions.map((item) => item.status);
+    if (statuses.includes(CONFIG.STATUSES.CONTRADICTED)) return CONFIG.STATUSES.CONTRADICTED;
+    if (statuses.length && statuses.every((status) => status === CONFIG.STATUSES.SUPPORTED)) return CONFIG.STATUSES.SUPPORTED;
+    if (statuses.length && statuses.every((status) => status === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE)) return CONFIG.STATUSES.INSUFFICIENT_EVIDENCE;
+    if (statuses.some((status) => status === CONFIG.STATUSES.SUPPORTED || status === CONFIG.STATUSES.PARTIALLY_SUPPORTED)) return CONFIG.STATUSES.PARTIALLY_SUPPORTED;
+    return CONFIG.STATUSES.INSUFFICIENT_EVIDENCE;
 }
 
 /**
@@ -198,11 +253,22 @@ Return ONLY this JSON object:
             continue;
         }
 
-        const result = await generateJsonWithGroq(prompt);
-        if (result && Array.isArray(result.verifications)) {
-            allResults.push(...result.verifications);
-        } else {
-            console.warn(`[Verifier Warning] Invalid response for batch starting at index ${i}`);
+        try {
+            const result = await generateJsonWithGroq(prompt);
+            if (result && Array.isArray(result.verifications)) {
+                allResults.push(...result.verifications);
+            } else {
+                allResults.push(...batch.map((claim) => ({
+                    claimId: claim.id,
+                    __verificationError: { code: "INVALID_MODEL_RESPONSE", message: "The model response did not contain a verifications array." }
+                })));
+            }
+        } catch (error) {
+            const safeMessage = error?.code || error?.name || "Provider request failed";
+            allResults.push(...batch.map((claim) => ({
+                claimId: claim.id,
+                __verificationError: { code: "VERIFICATION_PROVIDER_FAILED", message: safeMessage }
+            })));
         }
     }
 
@@ -211,50 +277,52 @@ Return ONLY this JSON object:
     const verifications = claims.map((claim) => {
         const item = verificationMap.get(claim.id);
 
+        if (item?.__verificationError) {
+            return buildVerificationFailure(claim, item.__verificationError.code, item.__verificationError.message);
+        }
         if (!item || !VALID_STATUSES.includes(item.status)) {
-            return {
-                claimId: claim.id,
-                claim: claim.text,
-                status: CONFIG.STATUSES.INSUFFICIENT_EVIDENCE,
-                rationale: "Automated verification returned an inconclusive or invalid response.",
-                evidence: [],
-                isCompound: Boolean(claim.isCompound),
-                subAssertions: claim.subAssertions || [],
-                reviewNeeded: true,
-                reviewReason: "Verification model failed to reach a structured determination.",
-                availableEvidenceSummary: "Inconclusive.",
-                missingEvidence: "Direct quotation corroboration.",
-                recommendedAction: "Manually review the cited sources."
-            };
+            return buildVerificationFailure(claim, "INVALID_MODEL_RESULT", "The verifier did not return a recognized status for this claim.");
         }
 
-        // Validate excerpts against actual source content to prevent hallucinations
-        const validatedEvidence = (Array.isArray(item.evidence) ? item.evidence : [])
-            .filter((entry) => {
-                const source = sourceMap.get(entry.sourceId);
-                if (!source || typeof entry.excerpt !== "string") return false;
-                return isExcerptInSource(entry.excerpt, source.content);
-            })
-            .slice(0, CONFIG.MAX_EVIDENCE_SOURCES_PER_CLAIM || 3)
-            .map((entry) => {
-                const source = sourceMap.get(entry.sourceId);
-                return {
-                    sourceId: entry.sourceId,
-                    sourceTitle: source.title,
-                    url: source.url,
-                    excerpt: entry.excerpt.trim()
-                };
-            });
+        const maxEvidence = CONFIG.MAX_EVIDENCE_SOURCES_PER_CLAIM || 3;
+        const validatedEvidence = validateEvidenceEntries(item.evidence, sourceMap, maxEvidence);
+        const assertionResults = [];
+        if (Array.isArray(item.assertionResults)) {
+            for (const assertion of item.assertionResults) {
+                const assertionText = assertion?.assertion ?? assertion?.text;
+                if (typeof assertionText !== "string" || !assertionText.trim() || !VALID_STATUSES.includes(assertion?.status)) {
+                    return buildVerificationFailure(claim, "INVALID_ASSERTION_RESULT", "An assertion-level result was missing its text or had an invalid status.");
+                }
+                const assertionEvidence = validateEvidenceEntries(assertion.evidence, sourceMap, maxEvidence);
+                const assertionStatus = assertion.status !== CONFIG.STATUSES.INSUFFICIENT_EVIDENCE && assertionEvidence.length === 0
+                    ? CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
+                    : assertion.status;
+                assertionResults.push({
+                    assertion: assertionText.trim(),
+                    status: assertionStatus,
+                    evidence: assertionEvidence,
+                    evidenceState: assertionEvidence.length > 0 ? "validated_excerpt_found" : "not_found_in_retrieved_excerpts",
+                    rationale: buildFinalRationale(assertionStatus, assertionEvidence.length)
+                });
+            }
+        }
 
-        // If status was marked supported or contradicted but no valid verbatim excerpt survived validation,
-        // demote to insufficient_evidence to prevent unsubstantiated claims
-        let finalStatus = item.status;
-        let finalRationale = item.rationale || "No rationale provided.";
+        const evidenceByKey = new Map();
+        for (const entry of [...validatedEvidence, ...assertionResults.flatMap((assertion) => assertion.evidence)]) {
+            const key = String(entry.sourceId) + ":" + normalizeText(entry.excerpt);
+            if (!evidenceByKey.has(key)) evidenceByKey.set(key, entry);
+        }
+        const finalEvidence = [...evidenceByKey.values()].slice(0, maxEvidence);
 
-        if ((finalStatus === CONFIG.STATUSES.SUPPORTED || finalStatus === CONFIG.STATUSES.CONTRADICTED) && validatedEvidence.length === 0) {
+        let finalStatus = assertionResults.length > 0
+            ? deriveAssertionStatus(assertionResults)
+            : item.status;
+
+        // No support/contradiction/partial determination survives without a validated excerpt.
+        if (finalStatus !== CONFIG.STATUSES.INSUFFICIENT_EVIDENCE && finalEvidence.length === 0) {
             finalStatus = CONFIG.STATUSES.INSUFFICIENT_EVIDENCE;
-            finalRationale = "Model suggested support/contradiction, but no matching verbatim excerpt could be validated in source texts.";
         }
+        const finalRationale = buildFinalRationale(finalStatus, finalEvidence.length);
 
         const isFlagged =
             finalStatus === CONFIG.STATUSES.CONTRADICTED ||
@@ -267,38 +335,38 @@ Return ONLY this JSON object:
             claim: claim.text,
             status: finalStatus,
             rationale: finalRationale,
-            evidence: validatedEvidence,
+            evidence: finalEvidence,
+            assertionResults,
             isCompound: Boolean(claim.isCompound),
             subAssertions: claim.subAssertions || [],
             reviewNeeded: isFlagged,
-            reviewReason: item.reviewReason || (
-                finalStatus === CONFIG.STATUSES.CONTRADICTED
-                    ? "Direct conflict between claim and retrieved evidence."
-                    : finalStatus === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
-                    ? "No verifiable excerpt found in retrieved sources."
-                    : finalStatus === CONFIG.STATUSES.PARTIALLY_SUPPORTED
-                    ? "Evidence supports only partial facets of the claim."
-                    : claim.isCompound
-                    ? "Compound statement containing multiple sub-assertions requiring separate checks."
-                    : null
-            ),
-            availableEvidenceSummary: item.availableEvidenceSummary || (
-                validatedEvidence.length > 0
-                    ? `Found ${validatedEvidence.length} validated excerpt(s).`
-                    : "No matching excerpts found."
-            ),
-            missingEvidence: item.missingEvidence || (
-                finalStatus === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
-                    ? "Specific factual citation confirming exact figures, dates, or claims."
-                    : null
-            ),
-            recommendedAction: item.recommendedAction || (
-                finalStatus === CONFIG.STATUSES.CONTRADICTED
-                    ? "Compare conflicting source texts and consult primary regulatory or academic filings."
-                    : finalStatus === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
-                    ? "Conduct a targeted search with specific domain keywords."
-                    : "Inspect source context to verify nuanced phrasing."
-            )
+            reviewReason: finalStatus === CONFIG.STATUSES.CONTRADICTED
+                ? "The verifier identified evidence it classified as directly conflicting with the claim."
+                : finalStatus === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
+                ? "The retrieved evidence does not establish or refute every material element of this claim."
+                : finalStatus === CONFIG.STATUSES.PARTIALLY_SUPPORTED
+                ? "Only part of the claim is established by the retrieved evidence."
+                : claim.isCompound
+                ? "Compound statement containing multiple assertions requiring separate checks."
+                : null,
+            availableEvidenceSummary: finalEvidence.length > 0
+                ? `${finalEvidence.length} excerpt(s) matched the retrieved source text. Text matching does not independently establish factual entailment.`
+                : "No model-provided excerpt passed verbatim validation against the retrieved source text.",
+            missingEvidence: finalStatus === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
+                ? (finalEvidence.length > 0
+                    ? "A source passage that directly establishes the unresolved factual element(s)."
+                    : "A source passage that directly establishes or contradicts the claim.")
+                : finalStatus === CONFIG.STATUSES.PARTIALLY_SUPPORTED
+                ? "Direct evidence for the remaining material assertion(s)."
+                : null,
+            recommendedAction: finalStatus === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE
+                ? "Run a focused search for the unresolved factual elements and prefer primary sources."
+                : finalStatus === CONFIG.STATUSES.PARTIALLY_SUPPORTED
+                ? "Separate the claim into atomic assertions and verify each one independently."
+                : finalStatus === CONFIG.STATUSES.CONTRADICTED
+                ? "Inspect the conflicting excerpt and its surrounding source context."
+                : "Inspect source context if the claim is material to the final conclusion.",
+            verificationError: null
         };
     });
 
@@ -306,7 +374,8 @@ Return ONLY this JSON object:
         supported: verifications.filter((v) => v.status === CONFIG.STATUSES.SUPPORTED).length,
         partiallySupported: verifications.filter((v) => v.status === CONFIG.STATUSES.PARTIALLY_SUPPORTED).length,
         contradicted: verifications.filter((v) => v.status === CONFIG.STATUSES.CONTRADICTED).length,
-        insufficientEvidence: verifications.filter((v) => v.status === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE).length
+        insufficientEvidence: verifications.filter((v) => v.status === CONFIG.STATUSES.INSUFFICIENT_EVIDENCE).length,
+        technicalFailures: verifications.filter((v) => v.status === CONFIG.STATUSES.VERIFICATION_ERROR).length
     };
 
     return {
