@@ -4,6 +4,10 @@ import { cacheService } from "./src/services/cache.service.js";
 import { budgetService, RequestBudgetTracker } from "./src/services/budget.service.js";
 import { assessSourceQuality, assessSources } from "./src/services/source-quality.service.js";
 import { buildTrustAssessment } from "./src/services/trust-assessment.service.js";
+import {
+    normalizeVerificationItem,
+    isExcerptInSource
+} from "./src/agents/claim-verifier.agent.js";
 
 console.log("=========================================");
 console.log(" Running VeriMind AI Backend Unit Tests ");
@@ -124,10 +128,10 @@ test("assessSources aggregates diversity statistics", () => {
 test("buildTrustAssessment calculates rates and flags contradictions correctly", () => {
     const mockVerifications = {
         verifications: [
-            { claimId: "C1", status: "supported", evidence: [{ excerpt: "confirmed text" }] },
-            { claimId: "C2", status: "supported", evidence: [{ excerpt: "confirmed text 2" }] },
-            { claimId: "C3", status: "supported", evidence: [{ excerpt: "confirmed text 3" }] },
-            { claimId: "C4", status: "insufficient_evidence", evidence: [] }
+            { claimId: "C1", claim: "Claim one.", status: "supported", evidence: [{ excerpt: "confirmed text" }] },
+            { claimId: "C2", claim: "Claim two.", status: "supported", evidence: [{ excerpt: "confirmed text 2" }] },
+            { claimId: "C3", claim: "Claim three.", status: "supported", evidence: [{ excerpt: "confirmed text 3" }] },
+            { claimId: "C4", claim: "Claim four.", status: "insufficient_evidence", evidence: [] }
         ]
     };
 
@@ -143,14 +147,109 @@ test("buildTrustAssessment calculates rates and flags contradictions correctly",
     // Contradiction scenario must immediately downgrade assessment
     const contradictedVerifications = {
         verifications: [
-            { claimId: "C1", status: "supported", evidence: [{ excerpt: "confirmed text" }] },
-            { claimId: "C2", status: "contradicted", evidence: [{ excerpt: "conflicting text" }] }
+            { claimId: "C1", claim: "Claim one.", status: "supported", evidence: [{ excerpt: "confirmed text" }] },
+            { claimId: "C2", claim: "Claim two.", status: "contradicted", evidence: [{ excerpt: "conflicting text" }] }
         ]
     };
 
     const contradictedAssessment = buildTrustAssessment(contradictedVerifications);
     assert.strictEqual(contradictedAssessment.assessment, "contradicted");
     assert.ok(contradictedAssessment.warnings.some((w) => w.includes("conflict")));
+});
+
+
+ // 6. Claim verification normalization tests (no external API calls)
+test("excerpt validation requires the complete quotation to occur in the source", () => {
+    const source = "Toyota announced a planned 10 GWh battery plant in Japan for 2027.";
+    assert.equal(isExcerptInSource("planned 10 GWh battery plant in Japan for 2027", source), true);
+    assert.equal(isExcerptInSource("planned 10 GWh battery plant in Japan for 2028", source), false);
+    assert.equal(isExcerptInSource("Toyota announced a planned 10 GWh battery plant in Japan for 2027. Invented tail.", source), false);
+});
+
+test("unsupported model rationale is replaced when no excerpt validates", () => {
+    const result = normalizeVerificationItem(
+        { id: "C1", text: "Toyota's plant begins production in 2027." },
+        { status: "supported", rationale: "The source directly confirms this.", evidence: [{ sourceId: 1, excerpt: "This quotation is not in the source." }] },
+        [{ id: 1, title: "Source", url: "https://example.com", content: "The source discusses battery development." }]
+    );
+    assert.equal(result.status, CONFIG.STATUSES.INSUFFICIENT_EVIDENCE);
+    assert.equal(result.evidence.length, 0);
+    assert.match(result.rationale, /No model-provided excerpt passed/);
+    assert.doesNotMatch(result.rationale, /directly confirms/i);
+});
+
+test("validated excerpts do not make rationale claim more than quotation matching proves", () => {
+    const sourceText = "Toyota announced a planned 10 GWh battery plant in Japan for 2027.";
+    const result = normalizeVerificationItem(
+        { id: "C2", text: "Toyota plans a 10 GWh battery plant for 2027." },
+        { status: "supported", evidence: [{ sourceId: 1, excerpt: sourceText }] },
+        [{ id: 1, title: "Toyota", url: "https://example.com", content: sourceText }]
+    );
+    assert.equal(result.status, CONFIG.STATUSES.SUPPORTED);
+    assert.equal(result.evidence.length, 1);
+    assert.match(result.rationale, /does not independently prove/);
+});
+
+test("compound claim status is derived from validated assertion-level outcomes", () => {
+    const supportedText = "Toyota announced a planned 10 GWh battery plant in Japan for 2027.";
+    const result = normalizeVerificationItem(
+        {
+            id: "C3",
+            text: "Toyota plans a 10 GWh plant in 2027 and it will serve premium models.",
+            isCompound: true,
+            subAssertions: [
+                "Toyota plans a 10 GWh plant in 2027.",
+                "The plant will serve premium models."
+            ]
+        },
+        {
+            status: "supported",
+            evidence: [],
+            assertionResults: [
+                {
+                    assertion: "Toyota plans a 10 GWh plant in 2027.",
+                    status: "supported",
+                    evidence: [{ sourceId: 1, excerpt: supportedText }]
+                },
+                {
+                    assertion: "The plant will serve premium models.",
+                    status: "supported",
+                    evidence: [{ sourceId: 1, excerpt: "A quotation that does not exist in the source." }]
+                }
+            ]
+        },
+        [{ id: 1, title: "Toyota", url: "https://example.com", content: supportedText }]
+    );
+    assert.equal(result.status, CONFIG.STATUSES.PARTIALLY_SUPPORTED);
+    assert.equal(result.assertionResults[0].status, CONFIG.STATUSES.SUPPORTED);
+    assert.equal(result.assertionResults[1].status, CONFIG.STATUSES.INSUFFICIENT_EVIDENCE);
+    assert.equal(result.evidence.length, 1);
+});
+
+test("missing assertion-level results on a compound claim are a technical failure", () => {
+    const result = normalizeVerificationItem(
+        { id: "C4", text: "A compound claim.", isCompound: true, subAssertions: ["Part one.", "Part two."] },
+        { status: "supported", evidence: [] },
+        []
+    );
+    assert.equal(result.status, CONFIG.STATUSES.VERIFICATION_ERROR);
+    assert.equal(result.verificationError.code, "ASSERTION_RESULTS_MISSING");
+});
+
+test("trust metrics exclude technical and malformed records and cap the rating", () => {
+    const assessment = buildTrustAssessment({
+        verifications: [
+            { claimId: "C1", claim: "A supported claim.", status: "supported", evidence: [{ excerpt: "verified quote" }] },
+            { claimId: "C2", claim: "A failed claim.", status: "verification_error", evidence: [] },
+            { claimId: "C3", claim: "An invalid claim.", status: "unknown_status", evidence: [] }
+        ]
+    });
+    assert.equal(assessment.metrics.totalClaims, 1);
+    assert.equal(assessment.metrics.supported, 1);
+    assert.equal(assessment.metrics.technicalFailures, 2);
+    assert.equal(assessment.metrics.invalidRecords, 1);
+    assert.equal(assessment.metrics.supportRate, 100);
+    assert.equal(assessment.assessment, "limited");
 });
 
 console.log(`\nResults: ${passed} of ${total} tests passed.`);
