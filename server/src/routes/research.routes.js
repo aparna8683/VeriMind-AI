@@ -117,7 +117,7 @@ router.post("/answer", async (req, res) => {
  */
 router.post("/reverify-claim", async (req, res) => {
     try {
-        const { claimId, claimText, sources } = req.body;
+        const { claimId, claimText, sources, verifications, claims } = req.body;
 
         if (!claimId || !claimText) {
             return res.status(400).json({
@@ -128,7 +128,15 @@ router.post("/reverify-claim", async (req, res) => {
 
         console.log(`[API /research/reverify-claim] Claim ${claimId}: "${claimText.slice(0, 50)}..."`);
 
-        const result = await reverifySpecificClaim(claimId, claimText, Array.isArray(sources) ? sources : []);
+        const result = await reverifySpecificClaim(
+            claimId,
+            claimText,
+            Array.isArray(sources) ? sources : [],
+            {
+                verifications: Array.isArray(verifications) ? verifications : [],
+                claims: Array.isArray(claims) ? claims : []
+            }
+        );
 
         return res.status(200).json({
             success: true,
