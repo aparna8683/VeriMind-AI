@@ -144,9 +144,9 @@ test("assessSources aggregates diversity statistics", () => {
 test("buildTrustAssessment calculates rates and flags contradictions correctly", () => {
     const mockVerifications = {
         verifications: [
-            { claimId: "C1", claim: "Claim one.", status: "supported", evidence: [{ excerpt: "confirmed text" }] },
-            { claimId: "C2", claim: "Claim two.", status: "supported", evidence: [{ excerpt: "confirmed text 2" }] },
-            { claimId: "C3", claim: "Claim three.", status: "supported", evidence: [{ excerpt: "confirmed text 3" }] },
+            { claimId: "C1", claim: "Claim one.", status: "supported", evidence: [{ sourceId: 1, excerpt: "confirmed text" }] },
+            { claimId: "C2", claim: "Claim two.", status: "supported", evidence: [{ sourceId: 2, excerpt: "confirmed text 2" }] },
+            { claimId: "C3", claim: "Claim three.", status: "supported", evidence: [{ sourceId: 3, excerpt: "confirmed text 3" }] },
             { claimId: "C4", claim: "Claim four.", status: "insufficient_evidence", evidence: [] }
         ]
     };
@@ -164,7 +164,7 @@ test("buildTrustAssessment calculates rates and flags contradictions correctly",
     const contradictedVerifications = {
         verifications: [
             { claimId: "C1", claim: "Claim one.", status: "supported", evidence: [{ excerpt: "confirmed text" }] },
-            { claimId: "C2", claim: "Claim two.", status: "contradicted", evidence: [{ excerpt: "conflicting text" }] }
+            { claimId: "C2", claim: "Claim two.", status: "contradicted", evidence: [{ sourceId: 2, excerpt: "conflicting text" }] }
         ]
     };
 
