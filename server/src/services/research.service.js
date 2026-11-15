@@ -1,7 +1,7 @@
 import { searchWeb } from "../providers/travily.provider.js";
 import { generateWithGroq } from "../providers/groq.provider.js";
 import { extractClaims } from "../agents/claim-extractor.agent.js";
-import { verifyClaims } from "../agents/claim-verifier.agent.js";
+import { isExcerptInSource, verifyClaims } from "../agents/claim-verifier.agent.js";
 import { buildTrustAssessment } from "./trust-assessment.service.js";
 import { assessSources } from "./source-quality.service.js";
 import { cacheService } from "./cache.service.js";
