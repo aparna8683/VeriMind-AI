@@ -220,7 +220,8 @@ export async function verifyClaims(claims, sources) {
                 supported: 0,
                 partiallySupported: 0,
                 contradicted: 0,
-                insufficientEvidence: 0
+                insufficientEvidence: 0,
+                technicalFailures: 0
             },
             verifications: []
         };
@@ -233,7 +234,8 @@ export async function verifyClaims(claims, sources) {
                 supported: 0,
                 partiallySupported: 0,
                 contradicted: 0,
-                insufficientEvidence: claims.length
+                insufficientEvidence: claims.length,
+                technicalFailures: 0
             },
             verifications: claims.map((c) => ({
                 claimId: c.id,
@@ -241,6 +243,14 @@ export async function verifyClaims(claims, sources) {
                 status: CONFIG.STATUSES.INSUFFICIENT_EVIDENCE,
                 rationale: "No retrieved web sources were available for verification.",
                 evidence: [],
+                assertionResults: Array.isArray(c.subAssertions) ? c.subAssertions.map((assertion) => ({
+                    assertion,
+                    status: CONFIG.STATUSES.INSUFFICIENT_EVIDENCE,
+                    evidence: [],
+                    evidenceState: "not_found_in_retrieved_excerpts"
+                })) : [],
+                isCompound: Boolean(c.isCompound),
+                subAssertions: Array.isArray(c.subAssertions) ? c.subAssertions : [],
                 reviewNeeded: true,
                 reviewReason: "Absence of retrieved reference sources.",
                 availableEvidenceSummary: "No sources retrieved.",
@@ -361,6 +371,14 @@ Return ONLY this JSON object:
                 status: CONFIG.STATUSES.INSUFFICIENT_EVIDENCE,
                 rationale: "No retrieved source contained relevant terms for this claim.",
                 evidence: [],
+                assertionResults: Array.isArray(claim.subAssertions) ? claim.subAssertions.map((assertion) => ({
+                    assertion,
+                    status: CONFIG.STATUSES.INSUFFICIENT_EVIDENCE,
+                    evidence: [],
+                    evidenceState: "not_found_in_retrieved_excerpts"
+                })) : [],
+                isCompound: Boolean(claim.isCompound),
+                subAssertions: Array.isArray(claim.subAssertions) ? claim.subAssertions : [],
                 reviewNeeded: true,
                 reviewReason: "No relevant source was selected.",
                 availableEvidenceSummary: "No relevant evidence found in the retrieved source set.",
@@ -400,6 +418,9 @@ Return ONLY this JSON object:
 
     const verifications = claims.map((claim) => {
         const item = verificationMap.get(String(claim.id));
+        if ((resultCounts.get(String(claim.id)) || 0) > 1) {
+            return buildVerificationFailure(claim, "DUPLICATE_MODEL_RESULT", "The model returned more than one verification record for this claim.");
+        }
         if (item?.__verificationError) {
             return buildVerificationFailure(claim, item.__verificationError.code, item.__verificationError.message);
         }
