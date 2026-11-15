@@ -150,6 +150,7 @@ export function App() {
                 const updatedResult = {
                     ...result,
                     sources: updatedSources,
+                    sourceFreshness: reverifyRes.sourceFreshness || result.sourceFreshness,
                     verification: {
                         ...result.verification,
                         summary: reverifyRes.verificationSummary || result.verification?.summary,
