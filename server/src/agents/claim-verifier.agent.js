@@ -59,7 +59,7 @@ function validateEvidenceEntries(entries, sourceMap, maxEvidence) {
     const seen = new Set();
     for (const entry of Array.isArray(entries) ? entries : []) {
         if (!entry || typeof entry.excerpt !== "string") continue;
-        const source = sourceMap.get(String(entry.sourceId));
+        const source = sourceMap.get(String(entry.sourceId)) || sourceMap.get(entry.sourceId);
         if (!source || !isExcerptInSource(entry.excerpt, source.content)) continue;
         const key = String(entry.sourceId) + ":" + normalizeText(entry.excerpt);
         if (seen.has(key)) continue;
