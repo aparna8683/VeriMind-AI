@@ -3,6 +3,34 @@
 > **Don't just trust AI. Verify it.**  
 > VeriMind AI is an evidence-aware research and investigative verification platform that cross-examines AI-generated research against live web sources, validates verbatim excerpt quotations, isolates unsupported or contradictory statements, and provides human-in-the-loop audit workflows.
 
+## Live Deployment
+
+- **Frontend:** https://veri-mind-ai-1buf.vercel.app/
+- **Backend API:** https://verimind-ai.onrender.com/
+- **Backend health check:** https://verimind-ai.onrender.com/api/health
+
+The frontend is deployed on Vercel and the Express API is deployed on Render. The frontend reads its API origin from the `VITE_API_URL` environment variable.
+
+### Deployment environment variables
+
+Configure these values in the hosting dashboards (do not commit real secrets):
+
+**Vercel — client project**
+| Variable | Value |
+| :--- | :--- |
+| `VITE_API_URL` | `https://verimind-ai.onrender.com` |
+
+After adding or changing a Vercel environment variable, redeploy the frontend so the new value is included in the build.
+
+**Render — backend service**
+| Variable | Value |
+| :--- | :--- |
+| `CLIENT_URL` | `https://veri-mind-ai-1buf.vercel.app` |
+| `GROQ_API_KEY` | Your Groq API key |
+| `TAVILY_API_KEY` | Your Tavily API key |
+
+Add optional provider keys only if you use those providers. Keep all API keys in Render's environment settings; never add them to Vercel variables or source control. The backend also allows local Vite development at `http://localhost:5173`.
+
 ---
 
 ## 1. Core Architecture & Workflow
@@ -159,6 +187,9 @@ npm run dev
 ```bash
 cd client
 npm install
+
+# Optional: create .env.local and set VITE_API_URL to your backend origin
+# VITE_API_URL=https://verimind-ai.onrender.com
 
 # Run Oxlint
 npm run lint
