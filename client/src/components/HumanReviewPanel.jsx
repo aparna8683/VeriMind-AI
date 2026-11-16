@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import {
     AlertCircle,
@@ -12,6 +13,7 @@ import {
     ChevronDown,
     ChevronUp
 } from "lucide-react";
+
 import { copyToClipboard } from "../utils/clipboard";
 
 export function HumanReviewPanel({
@@ -38,8 +40,13 @@ export function HumanReviewPanel({
     function toggleCollapse(claimId) {
         setCollapsedIds((prev) => {
             const next = new Set(prev);
-            if (next.has(claimId)) next.delete(claimId);
-            else next.add(claimId);
+
+            if (next.has(claimId)) {
+                next.delete(claimId);
+            } else {
+                next.add(claimId);
+            }
+
             return next;
         });
     }
@@ -55,6 +62,7 @@ Missing Evidence: ${item.missingEvidence || "Direct citation confirmation."}
 Recommended Action: ${item.recommendedAction || "Inspect source texts directly."}`;
 
         const success = await copyToClipboard(text);
+
         if (success) {
             setCopiedId(item.claimId);
             setTimeout(() => setCopiedId(null), 2000);
@@ -68,11 +76,20 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                     <div className="review-icon-badge">
                         <AlertCircle size={20} />
                     </div>
+
                     <div>
-                        <div className="review-eyebrow">HUMAN-IN-THE-LOOP AUDIT</div>
-                        <h3 className="review-heading">What Needs Your Verification?</h3>
+                        <div className="review-eyebrow">
+                            HUMAN-IN-THE-LOOP AUDIT
+                        </div>
+
+                        <h3 className="review-heading">
+                            What Needs Your Verification?
+                        </h3>
+
                         <p className="review-subheading">
-                            Algorithmic verification flags claims with contradictions, missing excerpts, or compound assertions.
+                            Algorithmic verification flags claims with
+                            contradictions, missing excerpts, or compound
+                            assertions.
                         </p>
                     </div>
                 </div>
@@ -85,46 +102,105 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
 
             {flaggedItems.length === 0 ? (
                 <div className="review-empty-state">
-                    <CheckCircle2 size={32} className="text-success" />
-                    <h4>No claims flagged by automated audit rules</h4>
+                    <CheckCircle2
+                        size={32}
+                        className="text-success"
+                    />
+
+                    <h4>
+                        No claims flagged by automated audit rules
+                    </h4>
+
                     <p>
-                        All extracted claims have matching verbatim excerpts in retrieved web sources with zero identified contradictions.
+                        All extracted claims have matching verbatim excerpts
+                        in retrieved web sources with zero identified
+                        contradictions.
                     </p>
+
                     <span className="empty-disclaimer">
-                        Note: Automated alignment does not replace professional domain expertise or primary literature review.
+                        Note: Automated alignment does not replace
+                        professional domain expertise or primary literature
+                        review.
                     </span>
                 </div>
             ) : (
                 <div className="review-items-list">
                     {flaggedItems.map((item) => {
-                        const isContradicted = item.status === "contradicted";
-                        const isInsufficient = item.status === "insufficient_evidence";
-                        const isPartial = item.status === "partially_supported";
-                        const isVerificationError = item.status === "verification_error";
-                        const isCollapsed = collapsedIds.has(item.claimId);
-                        const isReverifying = reverifyingClaimId === item.claimId;
+                        const isContradicted =
+                            item.status === "contradicted";
+
+                        const isInsufficient =
+                            item.status === "insufficient_evidence";
+
+                        const isPartial =
+                            item.status === "partially_supported";
+
+                        const isVerificationError =
+                            item.status === "verification_error";
+
+                        const isCollapsed =
+                            collapsedIds.has(item.claimId);
+
+                        const isReverifying =
+                            reverifyingClaimId === item.claimId;
 
                         return (
                             <article
                                 key={item.claimId}
-                                className={`review-card ${isContradicted ? "border-danger" : isPartial ? "border-blue" : "border-warning"}`}
+                                className={`review-card ${
+                                    isContradicted
+                                        ? "border-danger"
+                                        : isPartial
+                                            ? "border-blue"
+                                            : "border-warning"
+                                }`}
                             >
                                 <div className="review-card-top">
                                     <div className="review-card-meta">
-                                        <span className="claim-id-tag">{item.claimId}</span>
-                                        <span className={`status-pill status-${item.status}`}>
-                                            {isContradicted && <ShieldAlert size={13} />}
-                                            {isInsufficient && <AlertTriangle size={13} />}
-                                            {isPartial && <AlertCircle size={13} />}
+                                        <span className="claim-id-tag">
+                                            {item.claimId}
+                                        </span>
+
+                                        <span
+                                            className={`status-pill status-${item.status}`}
+                                        >
+                                            {isContradicted && (
+                                                <ShieldAlert size={13} />
+                                            )}
+
+                                            {isInsufficient && (
+                                                <AlertTriangle size={13} />
+                                            )}
+
+                                            {isPartial && (
+                                                <AlertCircle size={13} />
+                                            )}
+
                                             {item.status.replaceAll("_", " ")}
                                         </span>
+
                                         {item.isCompound && (
-                                            <span className="badge badge-compound">Compound Statement</span>
+                                            <span className="badge badge-compound">
+                                                Compound Statement
+                                            </span>
                                         )}
-                                        {item.reverificationAttempt?.status === "failed" ? (
-                                            <span className="badge badge-warning" title={item.reverificationAttempt.message}>Retry failed; previous result kept</span>
-                                        ) : item.reverified && (
-                                            <span className="badge badge-reverified">Re-verified</span>
+
+                                        {item.reverificationAttempt?.status ===
+                                        "failed" ? (
+                                            <span
+                                                className="badge badge-warning"
+                                                title={
+                                                    item.reverificationAttempt.message
+                                                }
+                                            >
+                                                Retry failed; previous result kept
+                                            </span>
+                                        ) : (
+                                            item.reverified && (
+                                                <span className="badge badge-reverified">
+                                                    Re-verified
+                                                </span>
+                                            )
                                         )}
                                     </div>
 
@@ -132,43 +208,102 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                                         <button
                                             type="button"
                                             className="btn btn-ghost btn-xs"
-                                            onClick={() => handleCopyChecklist(item)}
+                                            onClick={() =>
+                                                handleCopyChecklist(item)
+                                            }
                                             title="Copy review audit checklist"
                                         >
-                                            {copiedId === item.claimId ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-                                            <span>{copiedId === item.claimId ? "Copied" : "Copy Checklist"}</span>
+                                            {copiedId === item.claimId ? (
+                                                <Check
+                                                    size={13}
+                                                    className="text-success"
+                                                />
+                                            ) : (
+                                                <Copy size={13} />
+                                            )}
+
+                                            <span>
+                                                {copiedId === item.claimId
+                                                    ? "Copied"
+                                                    : "Copy Checklist"}
+                                            </span>
                                         </button>
 
-                                        {onReverifyClaim && (isInsufficient || isVerificationError) && (
-                                            <button
-                                                type="button"
-                                                className="btn btn-secondary btn-xs"
-                                                onClick={() => onReverifyClaim(item.claimId, item.claim)}
-                                                disabled={isReverifying || !item.claim?.trim()}
-                                                title="Perform focused search on this claim"
-                                            >
-                                                <RefreshCw size={12} className={isReverifying ? "spin" : ""} />
-                                                <span>{isReverifying ? "Searching..." : isVerificationError ? "Retry Verification" : "Targeted Re-Search"}</span>
-                                            </button>
-                                        )}
+                                        {onReverifyClaim &&
+                                            (isInsufficient ||
+                                                isVerificationError) && (
+                                                <button
+                                                    type="button"
+                                                    className="btn btn-secondary btn-xs"
+                                                    onClick={() =>
+                                                        onReverifyClaim(
+                                                            item.claimId,
+                                                            item.claim
+                                                        )
+                                                    }
+                                                    disabled={
+                                                        isReverifying ||
+                                                        !item.claim?.trim()
+                                                    }
+                                                    title="Perform focused search on this claim"
+                                                >
+                                                    <RefreshCw
+                                                        size={12}
+                                                        className={
+                                                            isReverifying
+                                                                ? "spin"
+                                                                : ""
+                                                        }
+                                                    />
+
+                                                    <span>
+                                                        {isReverifying
+                                                            ? "Searching..."
+                                                            : isVerificationError
+                                                                ? "Retry Verification"
+                                                                : "Targeted Re-Search"}
+                                                    </span>
+                                                </button>
+                                            )}
 
                                         <button
                                             type="button"
                                             className="btn btn-icon btn-xs"
-                                            onClick={() => toggleCollapse(item.claimId)}
-                                            title={isCollapsed ? "Expand" : "Collapse"}
+                                            onClick={() =>
+                                                toggleCollapse(item.claimId)
+                                            }
+                                            title={
+                                                isCollapsed
+                                                    ? "Expand"
+                                                    : "Collapse"
+                                            }
                                         >
-                                            {isCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                                            {isCollapsed ? (
+                                                <ChevronDown size={14} />
+                                            ) : (
+                                                <ChevronUp size={14} />
+                                            )}
                                         </button>
                                     </div>
                                 </div>
 
                                 {/* 1. What the claim says */}
                                 <div className="review-claim-statement">
-                                    <span className="label-caption">ASSERTED CLAIM:</span>
-                                    {item.claim?.trim()
-                                        ? <blockquote className="claim-quote">“{item.claim}”</blockquote>
-                                        : <p role="alert">Claim text is missing from this saved report. Re-run the research to restore this audit item.</p>}
+                                    <span className="label-caption">
+                                        ASSERTED CLAIM:
+                                    </span>
+
+                                    {item.claim?.trim() ? (
+                                        <blockquote className="claim-quote">
+                                            “{item.claim}”
+                                        </blockquote>
+                                    ) : (
+                                        <p role="alert">
+                                            Claim text is missing from this
+                                            saved report. Re-run the research
+                                            to restore this audit item.
+                                        </p>
+                                    )}
                                 </div>
 
                                 {!isCollapsed && (
@@ -177,36 +312,77 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                                         <div className="breakdown-box box-reason">
                                             <div className="box-label">
                                                 <AlertCircle size={13} />
-                                                <span>Why it requires review</span>
+                                                <span>
+                                                    Why it requires review
+                                                </span>
                                             </div>
-                                            <p>{isVerificationError
-                                                ? item.verificationError?.message || item.rationale || "The verification process failed; this is not a factual conclusion."
-                                                : item.reviewReason || item.rationale}</p>
+
+                                            <p>
+                                                {isVerificationError
+                                                    ? item.verificationError
+                                                        ?.message ||
+                                                      item.rationale ||
+                                                      "The verification process failed; this is not a factual conclusion."
+                                                    : item.reviewReason ||
+                                                      item.rationale}
+                                            </p>
                                         </div>
 
-                                        {/* 3. What evidence is currently available */}
+                                        {/* 3. Currently available evidence */}
                                         <div className="breakdown-box box-available">
                                             <div className="box-label">
                                                 <Search size={13} />
-                                                <span>Currently Available Evidence</span>
+                                                <span>
+                                                    Currently Available Evidence
+                                                </span>
                                             </div>
-                                            <p>{item.availableEvidenceSummary || (item.evidence?.length > 0 ? `${item.evidence.length} excerpt(s) recorded` : "No direct excerpts located.")}</p>
+
+                                            <p>
+                                                {item.availableEvidenceSummary ||
+                                                    (item.evidence?.length > 0
+                                                        ? `${item.evidence.length} excerpt(s) recorded`
+                                                        : "No direct excerpts located.")}
+                                            </p>
 
                                             {item.evidence?.length > 0 && (
                                                 <div className="evidence-mini-list">
-                                                    {item.evidence.map((ev, i) => (
-                                                        <div key={i} className="evidence-quote-snippet">
-                                                            <div className="snippet-source">
-                                                                Source [{ev.sourceId}] {ev.sourceTitle}
+                                                    {item.evidence.map(
+                                                        (ev, i) => (
+                                                            <div
+                                                                key={i}
+                                                                className="evidence-quote-snippet"
+                                                            >
+                                                                <div className="snippet-source">
+                                                                    Source [
+                                                                    {ev.sourceId}
+                                                                    ]{" "}
+                                                                    {ev.sourceTitle}
+                                                                </div>
+
+                                                                <div className="snippet-text">
+                                                                    “{ev.excerpt}”
+                                                                </div>
+
+                                                                {ev.url && (
+                                                                    <a
+                                                                        href={ev.url}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        className="snippet-link"
+                                                                    >
+                                                                        Inspect
+                                                                        source
+                                                                        text{" "}
+                                                                        <ExternalLink
+                                                                            size={
+                                                                                11
+                                                                            }
+                                                                        />
+                                                                    </a>
+                                                                )}
                                                             </div>
-                                                            <div className="snippet-text">“{ev.excerpt}”</div>
-                                                            {ev.url && (
-                                                                <a href={ev.url} target="_blank" rel="noreferrer" className="snippet-link">
-                                                                    Inspect source text <ExternalLink size={11} />
-                                                                </a>
-                                                            )}
-                                                        </div>
-                                                    ))}
+                                                        )
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
@@ -215,18 +391,31 @@ Recommended Action: ${item.recommendedAction || "Inspect source texts directly."
                                         <div className="breakdown-box box-missing">
                                             <div className="box-label">
                                                 <AlertTriangle size={13} />
-                                                <span>What Evidence is Missing</span>
+                                                <span>
+                                                    What Evidence is Missing
+                                                </span>
                                             </div>
-                                            <p>{item.missingEvidence || "Direct, unambiguous citation confirming all specific dates, figures, or asserted causality."}</p>
+
+                                            <p>
+                                                {item.missingEvidence ||
+                                                    "Direct, unambiguous citation confirming all specific dates, figures, or asserted causality."}
+                                            </p>
                                         </div>
 
-                                        {/* 5. What the user should verify next */}
+                                        {/* 5. Recommended next step */}
                                         <div className="breakdown-box box-action">
                                             <div className="box-label">
                                                 <CheckCircle2 size={13} />
-                                                <span>Recommended Next Step</span>
+                                                <span>
+                                                    Recommended Next Step
+                                                </span>
                                             </div>
-                                            <p><strong>{item.recommendedAction}</strong></p>
+
+                                            <p>
+                                                <strong>
+                                                    {item.recommendedAction}
+                                                </strong>
+                                            </p>
                                         </div>
                                     </div>
                                 )}
