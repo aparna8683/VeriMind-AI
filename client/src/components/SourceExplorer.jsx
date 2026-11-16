@@ -219,6 +219,13 @@ function CategoryBadge({ category, label }) {
                     <span>{label || "Healthcare Organization"}</span>
                 </span>
             );
+        case "social_media_user_generated":
+            return (
+                <span className="category-badge cat-other">
+                    <Globe size={12} />
+                    <span>{label || "Social Media / User-Generated"}</span>
+                </span>
+            );
         case "personal_blog_forum":
             return (
                 <span className="category-badge cat-other">

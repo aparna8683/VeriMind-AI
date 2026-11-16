@@ -5,7 +5,7 @@ import CONFIG from "../config/constants.js";
  * Extracts atomic, checkable factual claims from the research answer.
  * Also flags compound statements containing multiple distinct assertions.
  */
-export async function extractClaims(answer, sources = []) {
+export async function extractClaims(answer, sources = [], { generateJson = generateJsonWithGroq } = {}) {
     if (!answer || typeof answer !== "string") {
         throw new Error("A valid answer is required for claim extraction");
     }
@@ -29,12 +29,13 @@ RULES:
 2. Each claim must express one specific factual statement.
 3. Exclude subjective opinions, questions, speculative advice, and generic introductory remarks.
 4. If a statement combines multiple independent facts (e.g. "X occurred in 2023 AND increased revenue by 40%"), extract it and mark "isCompound": true with "subAssertions".
-5. Preserve original meaning. Do not introduce new facts.
-6. Capture cited source IDs if mentioned as [1], [2], etc.
-7. Only include source IDs that exist in AVAILABLE SOURCE IDs.
-8. Avoid duplicate claims.
-9. Return at most ${maxClaims} of the most critical factual claims.
-10. Return an empty claims array if no factual claims exist.
+5. Make each subAssertion one independently checkable factual statement, including distinct study design, population, duration, and outcome details where present.
+6. Preserve original meaning. Do not introduce new facts.
+7. Capture cited source IDs if mentioned as [1], [2], etc.
+8. Only include source IDs that exist in AVAILABLE SOURCE IDs.
+9. Avoid duplicate claims.
+10. Return at most ${maxClaims} of the most critical factual claims.
+11. Return an empty claims array if no factual claims exist.
 
 Return JSON in exactly this structure:
 {
@@ -50,7 +51,7 @@ Return JSON in exactly this structure:
 }
 `;
 
-    const result = await generateJsonWithGroq(prompt);
+    const result = await generateJson(prompt);
 
     if (!result || !Array.isArray(result.claims)) {
         throw new Error("Invalid claim extraction response structure from LLM");

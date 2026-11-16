@@ -66,6 +66,7 @@ export async function searchWeb(query, options = {}) {
                 title: item.title || "Untitled Source",
                 url: item.url,
                 content: item.content || "",
+                publishedDate: item.published_date || null,
                 score: typeof item.score === "number" ? item.score : null
             })),
             cached: false

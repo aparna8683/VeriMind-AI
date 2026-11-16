@@ -150,6 +150,7 @@ export function App() {
                 const updatedResult = {
                     ...result,
                     sources: updatedSources,
+                    sourceFreshness: reverifyRes.sourceFreshness || result.sourceFreshness,
                     verification: {
                         ...result.verification,
                         summary: reverifyRes.verificationSummary || result.verification?.summary,
@@ -247,6 +248,7 @@ export function App() {
                             <EvidenceOverview
                                 trustAssessment={result.trustAssessment}
                                 sourcesCount={result.sources?.length || 0}
+                                sourceFreshness={result.sourceFreshness || null}
                             />
                         )}
 

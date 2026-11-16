@@ -108,7 +108,8 @@ export async function generateJsonWithGroq(prompt) {
                     { role: "user", content: prompt }
                 ],
                 temperature: 0,
-                max_tokens: CONFIG.GROQ_JSON_MAX_TOKENS || 1200,
+                reasoning_effort: "low",
+                max_completion_tokens: CONFIG.GROQ_JSON_MAX_TOKENS || 3000,
                 response_format: { type: "json_object" }
             }, { signal: controller.signal, timeout: timeoutMs });
 
@@ -118,8 +119,11 @@ export async function generateJsonWithGroq(prompt) {
             return JSON.parse(extractJsonString(rawContent));
         } catch (error) {
             const status = Number(error.status);
-            const isAbort = error.name === "AbortError" || error.name === "APIConnectionTimeoutError";
-            const retryable = status === 429 || status === 503;
+            const isAbort =
+                controller.signal.aborted ||
+                error.name === "AbortError" ||
+                error.name === "APIConnectionTimeoutError" ||
+                error.name === "APIUserAbortError";
 
             if (isAbort || error.message?.toLowerCase().includes("timeout")) {
                 const timeoutError = new Error(`Groq JSON request timed out after ${timeoutMs}ms`);
@@ -127,6 +131,13 @@ export async function generateJsonWithGroq(prompt) {
                 console.error("[Groq JSON Timeout]", timeoutError.message);
                 throw timeoutError;
             }
+
+            if (error instanceof SyntaxError) {
+                console.error("[Groq JSON Parse Error]", error.message);
+                throw new Error("Groq returned invalid JSON");
+            }
+
+            const retryable = status === 429 || status === 503;
 
             if (!retryable || attempt === maxAttempts) {
                 console.error(`[Groq JSON Error] Attempt ${attempt} failed:`, error.message);
