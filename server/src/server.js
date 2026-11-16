@@ -13,8 +13,27 @@ dotenv.config();
 const app = express();
 const PORT = CONFIG.PORT;
 
+// Allow the deployed Vercel app and local Vite development.
+// Set CLIENT_URL on Render to override/add comma-separated frontend origins.
+const allowedOrigins = (
+    process.env.CLIENT_URL ||
+    "https://veri-mind-ai-1buf.vercel.app,http://localhost:5173"
+)
+    .split(",")
+    .map((origin) => origin.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin(origin, callback) {
+        // Allow server-to-server requests and local tools that do not send an Origin.
+        if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ""))) {
+            return callback(null, true);
+        }
+
+        return callback(new Error("This origin is not allowed by the API CORS policy."));
+    }
+}));
 app.use(express.json({ limit: "2mb" }));
 
 // API routes
@@ -77,12 +96,12 @@ app.use((err, req, res, next) => {
     });
 });
 
-app.listen(PORT, () => {
-    console.log(`===============================================`);
-    console.log(` VeriMind AI API v2.0.0 running at http://localhost:${PORT}`);
-    console.log(` Health check: http://localhost:${PORT}/api/health`);
-    console.log(` Research endpoint: http://localhost:${PORT}/api/research/answer`);
-    console.log(` Max searches per query: ${CONFIG.MAX_SEARCHES_PER_RESEARCH}`);
-    console.log(` Cache TTL: ${CONFIG.RESEARCH_CACHE_TTL_MINUTES} mins`);
-    console.log(`===============================================`);
+app.listen(PORT, "0.0.0.0", () => {
+    console.log("===============================================");
+    console.log(`VeriMind AI API v2.0.0 listening on port ${PORT}`);
+    console.log(`Health check: /api/health`);
+    console.log(`Allowed frontend origins: ${allowedOrigins.join(", ")}`);
+    console.log(`Max searches per query: ${CONFIG.MAX_SEARCHES_PER_RESEARCH}`);
+    console.log(`Cache TTL: ${CONFIG.RESEARCH_CACHE_TTL_MINUTES} mins`);
+    console.log("===============================================");
 });
