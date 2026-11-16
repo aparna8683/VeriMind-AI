@@ -3,7 +3,10 @@
  * Frontend API client communicating with backend research and verification endpoints.
  */
 
-const API_BASE_URL = "/api";
+// Set VITE_API_URL in Vercel to the deployed backend origin.
+// When unset, use the Vite proxy/relative API path for local development.
+const API_ORIGIN = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+const API_BASE_URL = `${API_ORIGIN}/api`;
 
 export async function researchQuestion(query, options = {}) {
     if (!query || typeof query !== "string" || !query.trim()) {
